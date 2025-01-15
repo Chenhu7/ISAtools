@@ -12,6 +12,8 @@ from src.remove_lowWeight_edges import GraphEdgeFilter
 from src.NNC_NIC_filter import NncNicGraphProcessor
 from src.filter_mutually_exclusive_exons import MutuallyExclusiveExonFilter
 from src.ISM_filter import TruncationProcessor
+from src.get_terminal_sites import TerminalSitesProcessor
+from src.gtf_rescue_TSS import GTFRescueTSS
 
 # 初始化日志
 logger = logging.getLogger("ISAtools")
@@ -24,14 +26,16 @@ def run_pipeline(args):
     """
     logger.info(" === ISAtools pipeline started === ")
 
-    # # Step 1: 数据预处理
-    # logger.info("Step 1: Preprocessing input data...")
-    # df = load_data(reference = args.reference, bam = args.bam, output = args.output)
-    # logger.info(f"Loaded input data with {len(df)} records.")
+    # Step 1: 数据预处理
+    logger.info("Step 1: Preprocessing input data...")
+    df = load_data(reference = args.reference, bam = args.bam, output = args.output)
+    logger.info(f"Loaded input data with {len(df)} records.")
     
     # df.to_parquet('SIRV_PB_0.parquet')
+    # df = pd.read_parquet('SIRV_PB_0.parquet')
     
-    df = pd.read_parquet('SIRV_PB_0.parquet')
+    df_raw = df.copy()
+    # df = df[df['frequency'] > 1].copy()
     
     # Step 2: 基因分组
     logger.info("Step 2: Performing gene grouping...")
@@ -91,20 +95,45 @@ def run_pipeline(args):
     df = truncationprocessor.filter_truncation_logFC(df)
     df = truncationprocessor.filter_truncation_delta(df)
     logger.info(f"ISM filter applied. Result: {len(df)} records.")
-
     
-    # # Step 5: Isoform 分类
-    # logger.info("Step 5: Classifying isoforms...")
-    # isoformclassifier = IsoformClassifier(num_processes=args.threads)
-    # df = isoformclassifier.add_category(df)  # 使用 isoform_classify 模块
-    # logger.info(f"Isoform classification completed. Total isoforms: {len(df)}.")
-    # print(df.value_count('category'))
+    
+    # 整理数据
+    df = df.explode(['TrStart', 'TrEnd'], ignore_index=True)
+    df = df.groupby(['Chr', 'Strand', 'exonChain'], as_index=False).agg({
+        'TrStart': tuple,
+        'TrEnd': tuple
+    }).reset_index(drop=True)
+    
+    
+    # step10: TS prediction
+    if args.gtf_anno is None:
+        logger.info("step10: TS prediction...")
+        terminalsitesprocessor = TerminalSitesProcessor(cluster_group_size = args.cluster_group_size,
+                                                        eps = args.eps,
+                                                        min_samples = args.min_samples,
+                                                        num_processes = args.threads)
+        df = terminalsitesprocessor.get_terminal_sites(df)
+        logger.info(f"TS prediction applied. Result: {len(df)} records.")
+    
+    else:
+        logger.info("step10: anno filter / TS prediction...")
+        run_Ref2exonChain(args.gtf_anno, args.output)
+        ref_anno = pd.read_csv(f"{args.output}/process/anno.exonChain", sep='\t')
+        ref_anno = ref_anno[['Chr', 'Strand', 'TrStart', 'TrEnd', 'exonChain']].drop_duplicates()
 
-    # # 保存结果
-    # output_file = f"{args.output}/final_result.csv"
-    # df.to_csv(output_file, index=False)
-    # logger.info(f"Results saved to {output_file}.")
-
+        gtfrescuetss = GTFRescueTSS(nnc_fake_exon_max_diff = args.nnc_fake_exon_max_diff, nnc_mismatch_max_diff = args.nnc_mismatch_max_diff,
+                                    nic_little_exon_diff = args.nic_little_exon_diff,
+                                    two_exon_FreqRatio = args.two_exon_FreqRatio,
+                                    ism_freqRatio_notrun = args.ism_freqRatio_notrun,
+                                    nic_freqratio_mean = args.nic_freqratio_mean, nic_freqratio_group = args.nic_freqratio_group,
+                                    nnc_freqratio_mean = args.nnc_freqratio_mean, nnc_freqratio_group = args.nnc_freqratio_group,
+                                    cluster_group_size = args.cluster_group_size, eps = args.eps, min_samples = args.min_samples,
+                                    num_processes = args.threads)
+        
+        df = gtfrescuetss.anno_process(df_raw,df,ref_anno)
+        logger.info(f"TS prediction applied. Result: {len(df)} records.")
+    
+    df.to_parquet(f'{args.output}/isatools_SIRV_PB.parquet')
     logger.info(" === ISAtools pipeline finished === ")
 
 
@@ -137,6 +166,24 @@ def main(cmd_args):
     parser.add_argument("--threshold_logFC_truncation_source_freq", type=float, default = -0.602, help="threshold_logFC_truncation_source_freq")
     parser.add_argument("--threshold_logFC_truncation_group_freq", type=float, default = -100, help="threshold_logFC_truncation_group_freq")
     parser.add_argument("--delta_Notrun_bp", type=int, default = 50, help="delta_Notrun_bp")
+    
+    # anno
+    parser.add_argument("--gtf_anno", '-g', type=str, default = None, help = "gene database in gffutils DB format or GTF/GFF [optional]")
+    parser.add_argument("--nnc_fake_exon_max_diff", type=int, default=100, help="nnc_fake_exon_max_diff")
+    parser.add_argument("--nnc_mismatch_max_diff", type=int, default=10, help="nnc_mismatch_max_diff")
+    parser.add_argument("--nic_little_exon_diff", type=int, default=10, help="nic_little_exon_diff")
+    parser.add_argument("--two_exon_FreqRatio", type=float, default=0.00001, help="two_exon_FreqRatio")
+    parser.add_argument("--ism_freqRatio_notrun", type=float, default=1, help="ism_freqRatio_notrun")
+    parser.add_argument("--nic_freqratio_mean", type=float, default=0, help="nic_freqratio_mean")
+    parser.add_argument("--nic_freqratio_group", type=float, default=0.05, help="nic_freqratio_group")
+    parser.add_argument("--nnc_freqratio_mean", type=float, default=0, help="nnc_freqratio_mean")
+    parser.add_argument("--nnc_freqratio_group", type=float, default=0.05, help="nnc_freqratio_group")
+
+    # TS prediction
+    parser.add_argument("--cluster_group_size", type=int, default = 1500, help="cluster_group_size")
+    parser.add_argument("--eps", type=int, default = 10, help="eps")
+    parser.add_argument("--min_samples", type=int, default = 20, help="min_samples")
+    
     
     
     args = parser.parse_args(cmd_args)

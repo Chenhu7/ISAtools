@@ -1,5 +1,6 @@
 import pandas as pd
 import multiprocessing as mp
+from src.gene_grouping import GeneClustering
 
 
 class IsoformClassifier:
@@ -38,8 +39,8 @@ class IsoformClassifier:
         """
         df_classification = []
         for _, group in df_group.groupby(['Chr', 'Strand', 'Group']):
-            df_ref = group[group['source'] == 'ref']
-            df_data = group[group['source'] == 'data']
+            df_ref = group[group['source'] == 'ref'].copy()
+            df_data = group[group['source'] == 'data'].copy()
 
             # 无参考链的情况，所有数据直接标记为 NNC
             if df_ref.empty:
@@ -80,14 +81,15 @@ class IsoformClassifier:
         添加分类结果到原数据中
         """
         # 准备数据
-        df1 = df1[['Chr', 'Strand', 'exonChain']].copy()
+        df = df1[['Chr', 'Strand', 'exonChain']].copy()
         df_ref = df_ref[['Chr', 'Strand', 'exonChain']].copy()
-        df1['source'] = 'data'
+        df['source'] = 'data'
         df_ref['source'] = 'ref'
 
         # 合并数据并进行聚类
-        df_combined = pd.concat([df1, df_ref], axis=0, ignore_index=True)
-        df_combined = self.cluster(df_combined)
+        df_combined = pd.concat([df, df_ref], axis=0, ignore_index=True)
+        gene_clustering = GeneClustering(num_processes=self.num_processes)  # 实例化 GeneClustering 类
+        df_combined = gene_clustering.cluster(df_combined)
 
         # 获取分类结果
         df_category = self.get_isoform_category(df_combined)

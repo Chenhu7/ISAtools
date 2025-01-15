@@ -130,9 +130,32 @@ def run_bam2exonchain(reference, bam, output_flnc, output_count):
     ]
     try:
         subprocess.run(cmd, check=True)
-        print(f"BAM2exonChain.pl 运行成功！生成文件：\n{output_flnc}\n{output_count}")
+        # print(f"BAM2exonChain.pl 运行成功！生成文件：\n{output_flnc}\n{output_count}")
     except subprocess.CalledProcessError as e:
         print(f"运行 BAM2exonChain.pl 时出错: {e}")
+        raise
+
+
+def run_Ref2exonChain(gtf_anno, output):
+    """
+    调用 processRef2exonChain.pl 脚本生成 exonChain 数据文件
+    """
+    # 创建输出目录
+    process_dir = os.path.join(output, "process")
+    os.makedirs(process_dir, exist_ok=True)
+
+    # 输出文件路径
+    output_exonchain = os.path.join(process_dir, "anno.exonChain")
+
+    # 构造命令
+    cmd = f"perl src/processRef2exonChain.pl {gtf_anno} | awk '$8!=\"NA\"' > {output_exonchain}"
+    
+    try:
+        # 执行命令
+        subprocess.run(cmd, shell=True, check=True, executable='/bin/bash')
+        # print(f"processRef2exonChain.pl 运行成功！生成文件：{output_exonchain}")
+    except subprocess.CalledProcessError as e:
+        print(f"运行 processRef2exonChain.pl 时出错: {e}")
         raise
 
 
