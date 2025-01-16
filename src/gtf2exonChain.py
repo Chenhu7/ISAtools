@@ -3,6 +3,7 @@ import re
 import os
 import sys
 
+
 def extract_ids(description):
     gene_id_match = re.search(r'gene_id "([^"]+)"', description)
     transcript_id_match = re.search(r'transcript_id "([^"]+)"', description)
