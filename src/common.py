@@ -4,7 +4,7 @@ import multiprocessing
 import re
 import subprocess
 import os
-
+from src.gene_grouping import GeneClustering
 
 # import pandas as pd
 # import multiprocessing
@@ -120,14 +120,17 @@ def run_bam2exonchain(reference, bam, output_flnc, output_count):
     """
     调用 BAM2exonChain.pl 脚本生成 exonChain 数据文件
     """
+    current_dir = os.path.dirname(os.path.realpath(__file__))  # 获取当前脚本所在路径
+    bam2exonchain_script = os.path.join(current_dir, 'BAM2exonChain.pl')
     cmd = [
         "perl",
-        "src/BAM2exonChain.pl",
+        bam2exonchain_script,
         reference,
         bam,
         output_flnc,
         output_count,
     ]
+    print(cmd)
     try:
         subprocess.run(cmd, check=True)
         # print(f"BAM2exonChain.pl 运行成功！生成文件：\n{output_flnc}\n{output_count}")
@@ -148,7 +151,9 @@ def run_Ref2exonChain(gtf_anno, output):
     output_exonchain = os.path.join(process_dir, "anno.exonChain")
 
     # 构造命令
-    cmd = f"perl src/processRef2exonChain.pl {gtf_anno} | awk '$8!=\"NA\"' > {output_exonchain}"
+    current_dir = os.path.dirname(os.path.realpath(__file__))
+    process_script = os.path.join(current_dir,'processRef2exonChain.pl')
+    cmd = f"perl {process_script} {gtf_anno} | awk '$8!=\"NA\"' > {output_exonchain}"
     
     try:
         # 执行命令
@@ -232,12 +237,19 @@ def junction_screening(df, junction_freq_ratio, conservative_base=None):
     """
     if conservative_base is None:
         conservative_base = {'GT-AG', 'AT-AC', 'GC-AG'}
+    else:
+        conservative_base = set(conservative_base.split(','))
     
     df = df.copy()
 
-    # 判断junction是否包含非保守碱基
+    # 判断junction是否包含非保守碱基 忽略大小写
     def contains_non_conservative(junction_str):
-        return not set(junction_str.split(',')).issubset(conservative_base)
+        junctions = {junc.upper() for junc in junction_str.split(',')}
+        return not junctions.issubset(conservative_base)
+    
+    # # 判断junction是否包含非保守碱基
+    # def contains_non_conservative(junction_str):
+    #     return not set(junction_str.split(',')).issubset(conservative_base)
     
     # 标记是否包含非保守碱基
     df['contains_non_conservative'] = df['junction'].apply(contains_non_conservative)
@@ -306,3 +318,61 @@ def filter_two_exon(df, threshol_twoExon_bp = 50):
               (df['contains_non_conservative']) & (df['frequency'] < 0.01 * total_meanfreq))]
     
     return df
+
+
+def correct_NNC(df,ref_anno,num_processes = 20):
+    """
+    矫正单个位点错配10bp内的NNC--> FSM 或(NNC截断--> ISM)
+    """
+    df_anno = ref_anno.copy()
+    df = df.copy()
+    df_anno['source'] = 'ref'
+    df['source'] = 'data'
+    df_anno['exonChain_sites'] = df_anno['exonChain'].apply(lambda x: list(map(int, x.split('-'))))
+    df['exonChain_sites'] = df['exonChain'].apply(lambda x: list(map(int, x.split('-'))))
+    
+    df_merged = pd.concat([df, df_anno], axis=0, ignore_index=True)
+    
+    # 将data和ref聚类
+    gene_clustering = GeneClustering(num_processes=num_processes)
+    df_merged = gene_clustering.cluster(df_merged)
+    
+    # 去除全是ref的group
+    df_merged = df_merged.groupby(['Chr', 'Strand', 'Group']).filter(lambda group: not (group['source'] == 'ref').all())
+    
+    # 只留下NNC
+    df_merged2 = df_merged[(df_merged['category'] == "NNC") | (df_merged['category'].isna())]
+    df_merged2 = df_merged2.groupby(['Chr', 'Strand', 'Group']).filter(lambda group: not (group['source'] == 'ref').all())
+    
+    # 进行矫正
+    for _,df_group in df_merged2.groupby(['Chr', 'Strand', 'Group']):
+        df_data = df_group[df_group['source'] == 'data'].copy()
+        df_ref = df_group[df_group['source'] == 'ref'].copy()
+        
+        ref_siets = list(set(df_ref['exonChain_sites'].explode().tolist()))
+        
+        for index,row in df_data.iterrows():
+            # print(len(row['exonChain_sites']) - len(set(row['exonChain']) & set(ref_siets)))
+            if len(row['exonChain_sites']) - len(set(row['exonChain_sites']) & set(ref_siets)) == 1:
+                data_site = list(set(row['exonChain_sites']) - set(ref_siets))[0]
+                
+                # 计算差值，提取差值最小的ref位点 并替换
+                differences = [abs(data_site - ref_site) for ref_site in ref_siets]
+                
+                # 若含有差值小于10的ref sites则替换
+                if min(differences) <= 10 and data_site not in ref_siets:
+                    # 找到最小差值的索引
+                    min_diff_index = differences.index(min(differences))
+                    # 获取最小差值的数
+                    ref_site = ref_siets[min_diff_index]
+                    
+                    # df_merged.loc[index, 'exonChain_sites'] = [ref_site if x == data_site else x for x in df_merged.loc[index, 'exonChain_sites']]
+                    df_merged.loc[index, 'exonChain'] = df_merged.loc[index, 'exonChain'].replace(str(data_site),str(ref_site))
+
+    df_return = df_merged[df_merged['source'] == 'data'].copy()
+    
+    df_return = df_return.explode(['TrStart', 'TrEnd'], ignore_index=True)
+    df_return = df_return.groupby(['Chr', 'Strand', 'Group', 'exonChain'],as_index=False).agg({'TrStart': list,'TrEnd': list}).reset_index(drop=True)
+    df_return['frequency'] = df_return['TrStart'].apply(len)
+    
+    return df_return

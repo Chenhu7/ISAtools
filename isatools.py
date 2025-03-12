@@ -34,8 +34,17 @@ def run_pipeline(args):
     # df.to_parquet('SIRV_PB_0.parquet')
     # df = pd.read_parquet('SIRV_PB_0.parquet')
     
+    # frequency过滤
     df_raw = df.copy()
-    # df = df[df['frequency'] > 1].copy()
+    logger.info(f"Step 1: Filtering frequency {args.filter_freq}...")
+    df = df[df['frequency'] >= args.filter_freq].copy()
+    logger.info(f"Filtered data with {len(df)} records.")
+    
+    # identity过滤
+    df_raw = df.copy()
+    logger.info(f"Step 1: Filtering identity {args.identity}...")
+    df = df[df['identity'] >= args.identity].copy()
+    logger.info(f"Filtered data with {len(df)} records.")
     
     # Step 2: 基因分组
     logger.info("Step 2: Performing gene grouping...")
@@ -65,24 +74,22 @@ def run_pipeline(args):
     
     # Step 6: NNC/NIC
     logger.info("Step 6: NNC/NIC filter...")
-    nncnicgraphprocessor = NncNicGraphProcessor(exon_excursion_diff_bp = args.exon_excursion_diff_bp, 
-                                                little_exon_bp = args.little_exon_bp, 
-                                                little_exon_jump_multiple = args.little_exon_jump_multiple, 
+    nncnicgraphprocessor = NncNicGraphProcessor(exon_excursion_diff_bp=args.exon_excursion_diff_bp, error_sites_diff_bp=args.error_sites_diff_bp,
+                                                error_sites_multiple=args.error_sites_multiple, little_exon_bp=args.little_exon_bp,
+                                                little_exon_mismatch_diff_bp=args.little_exon_mismatch_diff_bp, 
+                                                Nolittle_exon_mismatch_diff_bp=args.Nolittle_exon_mismatch_diff_bp,
+                                                little_exon_jump_multiple=args.little_exon_jump_multiple, 
                                                 num_processes = args.threads)
     df = nncnicgraphprocessor.nnc_nic_graph(df)
     logger.info(f"NNC/NIC filter applied. Result: {len(df)} records.")
     
-    # Step 7: filter_mutually_exclusive_exons
-    logger.info("Step 7: filter_mutually_exclusive_exons...")
-    mutuallyexclusiveexonfilter = MutuallyExclusiveExonFilter(mutually_exclusive_ref_ratio = args.mutually_exclusive_ref_ratio,
-                                                              num_processes = args.threads)
-    df = mutuallyexclusiveexonfilter.filter_mxes(df)
-    logger.info(f"MXEs filter applied. Result: {len(df)} records.")
     
-    # step8: two exon
-    logger.info("Step 8: two exon filter...")
-    df = filter_two_exon(df, threshol_twoExon_bp = args.threshol_twoExon_bp)
-    logger.info(f"two exon filter applied. Result: {len(df)} records.")
+    # # Step 7: filter_mutually_exclusive_exons
+    # logger.info("Step 7: filter_mutually_exclusive_exons...")
+    # mutuallyexclusiveexonfilter = MutuallyExclusiveExonFilter(mutually_exclusive_ref_ratio = args.mutually_exclusive_ref_ratio,
+    #                                                           num_processes = args.threads)
+    # df = mutuallyexclusiveexonfilter.filter_mxes(df)
+    # logger.info(f"MXEs filter applied. Result: {len(df)} records.")
     
     
     # step9: ISM filter
@@ -93,8 +100,14 @@ def run_pipeline(args):
                                               num_processes = args.threads)
     df = truncationprocessor.get_truncation(df)
     df = truncationprocessor.filter_truncation_logFC(df)
-    df = truncationprocessor.filter_truncation_delta(df)
+    # df = truncationprocessor.filter_truncation_delta(df)
     logger.info(f"ISM filter applied. Result: {len(df)} records.")
+    
+    
+    # step8: two exon
+    logger.info("Step 8: two exon filter...")
+    df = filter_two_exon(df, threshol_twoExon_bp = args.threshol_twoExon_bp)
+    logger.info(f"two exon filter applied. Result: {len(df)} records.")
     
     
     # 整理数据
@@ -121,18 +134,23 @@ def run_pipeline(args):
         ref_anno = pd.read_csv(f"{args.output}/process/anno.exonChain", sep='\t')
         ref_anno = ref_anno[['Chr', 'Strand', 'TrStart', 'TrEnd', 'exonChain']].drop_duplicates()
 
-        gtfrescuetss = GTFRescueTSS(nnc_fake_exon_max_diff = args.nnc_fake_exon_max_diff, nnc_mismatch_max_diff = args.nnc_mismatch_max_diff,
-                                    nic_little_exon_diff = args.nic_little_exon_diff,
-                                    two_exon_FreqRatio = args.two_exon_FreqRatio,
-                                    ism_freqRatio_notrun = args.ism_freqRatio_notrun,
-                                    nic_freqratio_mean = args.nic_freqratio_mean, nic_freqratio_group = args.nic_freqratio_group,
-                                    nnc_freqratio_mean = args.nnc_freqratio_mean, nnc_freqratio_group = args.nnc_freqratio_group,
-                                    cluster_group_size = args.cluster_group_size, eps = args.eps, min_samples = args.min_samples,
-                                    num_processes = args.threads)
-        
+        gtfrescuetss = GTFRescueTSS(little_exon_bp=args.little_exon_bp,
+                                mismatch_error_sites_bp=args.mismatch_error_sites_bp, 
+                                mismatch_error_sites_groupfreq_multiple=args.mismatch_error_sites_groupfreq_multiple,
+                                exon_excursion_diff_bp=args.exon_excursion_diff_bp,
+                                fake_exon_group_freq_multiple=args.fake_exon_group_freq_multiple,
+                                fake_exon_bp=args.fake_exon_group_freq_multiple,
+
+                                two_exon_FreqRatio = args.two_exon_FreqRatio,
+                                ism_freqRatio_notrun = args.ism_freqRatio_notrun,
+                                nic_freqratio_mean = args.nic_freqratio_mean, nic_freqratio_group = args.nic_freqratio_group,
+                                nnc_freqratio_mean = args.nnc_freqratio_mean, nnc_freqratio_group = args.nnc_freqratio_group,
+                                cluster_group_size = args.cluster_group_size, eps = args.eps, min_samples = args.min_samples,
+                                num_processes = args.threads)
         df = gtfrescuetss.anno_process(df_raw,df,ref_anno)
         logger.info(f"TS prediction applied. Result: {len(df)} records.")
     
+    df.to_csv(f'{args.output}/isatools_SIRV_PB.csv',index = False)
     df.to_parquet(f'{args.output}/isatools_SIRV_PB.parquet')
     logger.info(" === ISAtools pipeline finished === ")
 
@@ -150,28 +168,38 @@ def main(cmd_args):
     parser.add_argument("--threads", "-t", help="number of threads to use [default=16]", type=int,default=16)
     
     # 数据预处理
+    parser.add_argument("--filter_freq", type=float, default=0, help="Filtering exonChain frequency")
+    parser.add_argument("--identity", type=float, default=0.98, help="Filtering exonChain identity")
     parser.add_argument("--junction_freq_ratio", type=float, default=0.25, help="Frequency ratio for junction screening")
     parser.add_argument("--consensus_bp", type=int, default=10, help="Consensus correction threshold in bp")
     parser.add_argument("--consensus_multiple", type=float, default=0.1, help="Consensus multiple for correction")
     
     # NNC/NIC
     parser.add_argument("--threshold_lowWeight_edges", type=float, default=0.001, help="Frequency ratio for removing low weight edges")
-    parser.add_argument("--exon_excursion_diff_bp", type=int, default=5, help="exon_excursion_diff_bp")
-    parser.add_argument("--little_exon_bp", type=int, default=20, help="little_exon_bp")
-    parser.add_argument("--little_exon_jump_multiple", type=float, default=0.01, help="little_exon_jump_multiple")
-    parser.add_argument("--mutually_exclusive_ref_ratio", type=float, default=0.001, help="mutually_exclusive_ref_ratio")
-    parser.add_argument("--threshol_twoExon_bp", type=int, default=50, help="threshol_twoExon_bp")
-    
+    parser.add_argument("--exon_excursion_diff_bp", type=int, default=20, help="exon_excursion_diff_bp")
+    parser.add_argument("--error_sites_diff_bp", type=int, default=10, help="error_sites_diff_bp")
+    parser.add_argument("--error_sites_multiple", type=float, default=0.01, help="error_sites_multiple")
+    parser.add_argument("--little_exon_bp", type=int, default=30, help="little_exon_bp")
+    parser.add_argument("--little_exon_mismatch_diff_bp", type=int, default=10, help="little_exon_mismatch_diff_bp")
+    parser.add_argument("--Nolittle_exon_mismatch_diff_bp", type=int, default=20, help="Nolittle_exon_mismatch_diff_bp")
+    parser.add_argument("--little_exon_jump_multiple", type=float, default=0.1, help="little_exon_jump_multiple")
+
     # ISM
-    parser.add_argument("--threshold_logFC_truncation_source_freq", type=float, default = -0.602, help="threshold_logFC_truncation_source_freq")
+    parser.add_argument("--threshold_logFC_truncation_source_freq", type=float, default = 0, help="threshold_logFC_truncation_source_freq")
     parser.add_argument("--threshold_logFC_truncation_group_freq", type=float, default = -100, help="threshold_logFC_truncation_group_freq")
-    parser.add_argument("--delta_Notrun_bp", type=int, default = 50, help="delta_Notrun_bp")
+    parser.add_argument("--delta_Notrun_bp", type=int, default = 50, help="delta_Notrun_bp") # remove
+    
+    # two exon
+    parser.add_argument("--threshol_twoExon_bp", type=int, default=100, help="threshol_twoExon_bp")
     
     # anno
     parser.add_argument("--gtf_anno", '-g', type=str, default = None, help = "gene database in gffutils DB format or GTF/GFF [optional]")
-    parser.add_argument("--nnc_fake_exon_max_diff", type=int, default=100, help="nnc_fake_exon_max_diff")
-    parser.add_argument("--nnc_mismatch_max_diff", type=int, default=10, help="nnc_mismatch_max_diff")
-    parser.add_argument("--nic_little_exon_diff", type=int, default=10, help="nic_little_exon_diff")
+    parser.add_argument("--mismatch_error_sites_bp", type=int, default=20, help="mismatch_error_sites_bp")
+    parser.add_argument("--mismatch_error_sites_groupfreq_multiple", type=float, default=0.25, help="mismatch_error_sites_groupfreq_multiple")
+    # parser.add_argument("--exon_excursion_diff_bp", type=int, default=20, help="exon_excursion_diff_bp")
+    parser.add_argument("--fake_exon_group_freq_multiple", type=float, default=0.1, help="fake_exon_group_freq_multiple")
+    parser.add_argument("--fake_exon_bp", type=int, default=50, help="fake_exon_bp")
+    
     parser.add_argument("--two_exon_FreqRatio", type=float, default=0.00001, help="two_exon_FreqRatio")
     parser.add_argument("--ism_freqRatio_notrun", type=float, default=1, help="ism_freqRatio_notrun")
     parser.add_argument("--nic_freqratio_mean", type=float, default=0, help="nic_freqratio_mean")

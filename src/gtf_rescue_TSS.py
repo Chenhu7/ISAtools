@@ -4,13 +4,22 @@ from src.isoform_classify import IsoformClassifier
 from src.gene_grouping import GeneClustering
 from src.ISM_filter import TruncationProcessor
 from src.get_terminal_sites import TerminalSitesProcessor
+import multiprocessing as mp
+from src.NNC_NIC_filter import NncNicGraphProcessor
+import bisect
+from collections import Counter
+
 
 class GTFRescueTSS:
     def __init__(self, 
-                 nnc_fake_exon_max_diff = 100, nnc_mismatch_max_diff = 10,
-                 nic_little_exon_diff = 10,
-                 two_exon_FreqRatio=1,
+                 little_exon_bp=30,
+                 mismatch_error_sites_bp=20,
+                 mismatch_error_sites_groupfreq_multiple=0.25,
+                 exon_excursion_diff_bp=20,
+                 fake_exon_group_freq_multiple=0.1,
+                 fake_exon_bp=50,
                  
+                 two_exon_FreqRatio=1,
                  ism_freqRatio_notrun=4,
                  nic_freqratio_mean=0.1, nic_freqratio_group=0.25,
                  nnc_freqratio_mean=0.1, nnc_freqratio_group=0.25,
@@ -20,11 +29,14 @@ class GTFRescueTSS:
         """
         初始化参数
         """
-        self.nnc_fake_exon_max_diff = nnc_fake_exon_max_diff
-        self.nnc_mismatch_max_diff = nnc_mismatch_max_diff
-        self.nic_little_exon_diff = nic_little_exon_diff
-        self.two_exon_FreqRatio = two_exon_FreqRatio
+        self.little_exon_bp = little_exon_bp
+        self.mismatch_error_sites_bp=mismatch_error_sites_bp
+        self.mismatch_error_sites_groupfreq_multiple=mismatch_error_sites_groupfreq_multiple
+        self.exon_excursion_diff_bp=exon_excursion_diff_bp
+        self.fake_exon_group_freq_multiple=fake_exon_group_freq_multiple
+        self.fake_exon_bp=fake_exon_bp
         
+        self.two_exon_FreqRatio = two_exon_FreqRatio
         self.ism_freqRatio_notrun = ism_freqRatio_notrun
         self.nic_freqratio_mean = nic_freqratio_mean
         self.nic_freqratio_group = nic_freqratio_group
@@ -36,8 +48,8 @@ class GTFRescueTSS:
         self.min_samples = min_samples
         self.num_processes = num_processes
     
-    
-    def rescue_fsm(self, df_raw, df, ref_anno):
+    @staticmethod
+    def rescue_fsm(df_raw, df, ref_anno):
         """
         FSM rescue
         """
@@ -50,162 +62,8 @@ class GTFRescueTSS:
         ].copy()
         df_rescue["category"] = "FSM"
 
-        df = pd.concat([df[['Chr','Strand','exonChain','category','TrStart','TrEnd','key']],
-                    df_rescue[['Chr','Strand','exonChain','category','TrStart','TrEnd','key']]],ignore_index = True).reset_index(drop = True)  
-        return df
-    
-    
-    def nnc_correct(self,df,ref_anno):
-        """
-        NNC correct
-        """
-        # 初始化并预处理数据
-        df['frequency'] = df['TrStart'].apply(len)
-        df_FSM = df[df['category'] != 'NNC'].copy()
-        df_NNC = df[df['category'] == 'NNC'].copy()
-
-        df_NNC['source'] = 'data'
-        ref_anno['category'] = 'FSM'
-        df_NNC = pd.concat([df_NNC, ref_anno], ignore_index=True).reset_index(drop=True)
-
-        gene_clustering = GeneClustering(num_processes=self.num_processes)
-        df_NNC = gene_clustering.cluster(df_NNC)
-        
-        # 过滤全是FSM的group
-        df_NNC = df_NNC.groupby(['Chr', 'Strand', 'Group']).filter(lambda x: not (x['category'] == 'FSM').all())
-        df_NNC['exonChain2'] = df_NNC['exonChain'].apply(lambda x: tuple(map(int, x.split('-'))))
-
-        # 矫正和移除逻辑
-        correct_dict = {}
-
-        for _, df_group in df_NNC.groupby(['Chr', 'Strand', 'Group']):
-            df_ref_exonChain = df_group[df_group['category'] == 'FSM']
-            df_NNC_group = df_group[df_group['category'] != 'FSM']
-
-            if len(df_ref_exonChain) > 0:
-                ref_sites = set(site for exon in df_ref_exonChain['exonChain2'] for site in exon)
-
-                for index, row in df_NNC_group.iterrows():
-                    for ref_eC in df_ref_exonChain['exonChain2']:
-                        # 假外显子矫正
-                        if (row['Strand'] == '+' and row['exonChain2'][:-2] == ref_eC) or \
-                           (row['Strand'] == '-' and row['exonChain2'][2:] == ref_eC):
-                            if row['Strand'] == '+' and len(set(row['exonChain2'][-2:]) & ref_sites) == 0:
-                                diff = np.mean(row['TrEnd']) - row['exonChain2'][-1]
-                                if diff < self.nnc_fake_exon_max_diff:
-                                    correct_dict[row['Chr'] + row['Strand'] + row['exonChain']] = '-'.join(map(str, ref_eC))
-                                    break
-                            if row['Strand'] == '-' and len(set(row['exonChain2'][:2]) & ref_sites) == 0:
-                                diff = row['exonChain2'][0] - np.mean(row['TrStart'])
-                                if diff < self.nnc_fake_exon_max_diff:
-                                    correct_dict[row['Chr'] + row['Strand'] + row['exonChain']] = '-'.join(map(str, ref_eC))
-                                    break
-
-                        # 错配矫正
-                        diff_sites_row = sorted(set(row['exonChain2']) - set(ref_eC))
-                        diff_sites_ref = sorted(set(ref_eC) - set(row['exonChain2']))
-                        if len(diff_sites_row) == len(diff_sites_ref) and len(diff_sites_row) <= 2:
-                            diff_values = [abs(a - b) for a, b in zip(diff_sites_row, diff_sites_ref)]
-                            average_diff = np.mean(diff_values)
-                            potential_correct = '-'.join(map(str, ref_eC))
-                            if average_diff < self.nnc_mismatch_max_diff and potential_correct in df_FSM['exonChain']:
-                                correct_dict[row['Chr'] + row['Strand'] + row['exonChain']] = potential_correct
-                                break
-
-        # 应用矫正
-        df_NNC['key'] = df_NNC['Chr'] + df_NNC['Strand'] + df_NNC['exonChain']
-        df_NNC['exonChain'] = df_NNC.apply(lambda row: correct_dict.get(row['key'], row['exonChain']), axis=1)
-        df_NNC['category'] = df_NNC.apply(lambda row: 'FSM' if row['key'] in correct_dict else row['category'], axis=1)
-        df_NNC = df_NNC[df_NNC['source'] == 'data']
-
-        # 合并FSM与NNC
-        df = pd.concat([df_FSM[['Chr', 'Strand', 'exonChain', 'TrStart', 'TrEnd', 'category']],
-                        df_NNC[['Chr', 'Strand', 'exonChain', 'TrStart', 'TrEnd', 'category']]],
-                       ignore_index=True).reset_index(drop=True)
-
-        # 数据整理
-        df = df.explode(['TrStart', 'TrEnd'], ignore_index=True)
-        df = df.groupby(['Chr', 'Strand', 'exonChain', 'category'], as_index=False).agg({
-            'TrStart': tuple,
-            'TrEnd': tuple
-        }).reset_index(drop=True)
-
-        df['frequency'] = df['TrStart'].apply(len)
-        return df
-    
-    
-    def nic_correct(self, df, ref_anno):
-        """
-        nic correct
-        """
-        # 初始化
-        correct_dict = {}  # 存储需要矫正的exonChain {错误exonChain: 正确exonChain}
-        df_FSM = df[df['category'] != 'NIC'].copy()
-        df_NIC = df[df['category'] == 'NIC'].copy()
-
-        # 标记数据来源
-        df_NIC['source'] = 'data'
-        ref_anno['source'] = 'ref'
-        ref_anno['category'] = 'FSM'
-
-        # 合并数据并进行聚类
-        df_NIC = pd.concat([df_NIC, ref_anno], ignore_index=True).reset_index(drop=True)
-        gene_clustering = GeneClustering(num_processes=self.num_processes)
-        df_NIC = gene_clustering.cluster(df_NIC)
-
-        # 过滤全是FSM的组
-        df_NIC = df_NIC.groupby(['Chr', 'Strand', 'Group']).filter(lambda x: not (x['category'] == 'FSM').all())
-
-        # 计算外显子元组和小外显子元组
-        df_NIC['exonChain2'] = df_NIC['exonChain'].apply(lambda x: tuple(map(int, x.split('-'))))
-        df_NIC['exon_tuple'] = df_NIC['exonChain2'].apply(
-            lambda x: [(x[i], x[i + 1]) for i in range(1, len(x) - 2, 2)]
-        )
-        df_NIC['exon_tuple_filter'] = df_NIC['exon_tuple'].apply(
-            lambda x: [exon for exon in x if abs(exon[1] - exon[0]) <= self.nic_little_exon_diff]
-        )
-        df_NIC['exon_tuple_filter'] = df_NIC['exon_tuple_filter'].apply(lambda x: x if x else np.nan)
-
-        # 开始矫正
-        for _, df_group in df_NIC.groupby(['Chr', 'Strand', 'Group']):
-            df_ref_exonChain = df_group[df_group['category'] == 'FSM']
-            df_NIC_group = df_group[df_group['category'] != 'FSM']
-
-            # 获取参考小外显子
-            if len(df_ref_exonChain[~df_ref_exonChain['exon_tuple_filter'].isna()]) > 0:
-                little_exons = list(set(exon for l in df_ref_exonChain[~df_ref_exonChain['exon_tuple_filter'].isna()]['exon_tuple_filter'] for exon in l))
-
-                # 对NIC组数据进行矫正
-                for _, row in df_NIC_group.iterrows():
-                    for exon in little_exons:
-                        # 如果当前exonChain不包含该小外显子
-                        if exon not in row['exon_tuple']:
-                            corrected_exon_chain = '-'.join(map(str, sorted(list(row['exonChain2']) + list(exon))))
-                            # 如果矫正后的exonChain在参考数据中
-                            if corrected_exon_chain in df_ref_exonChain['exonChain'].tolist():
-                                correct_dict[row['Chr'] + row['Strand'] + row['exonChain']] = corrected_exon_chain
-
-        # 应用矫正
-        df_NIC['key'] = df_NIC['Chr'] + df_NIC['Strand'] + df_NIC['exonChain']
-        df_NIC['exonChain'] = df_NIC.apply(lambda row: correct_dict.get(row['key'], row['exonChain']), axis=1)
-        df_NIC['category'] = df_NIC.apply(lambda row: 'FSM' if row['key'] in correct_dict else row['category'], axis=1)
-        df_NIC = df_NIC[df_NIC['source'] == 'data']
-
-        # 合并FSM和修正后的NIC数据
-        df = pd.concat(
-            [df_FSM[['Chr', 'Strand', 'exonChain', 'TrStart', 'TrEnd', 'category']],
-             df_NIC[['Chr', 'Strand', 'exonChain', 'TrStart', 'TrEnd', 'category']]],
-            ignore_index=True
-        ).reset_index(drop=True)
-
-        # 数据整理
-        df = df.explode(['TrStart', 'TrEnd'], ignore_index=True)
-        df = df.groupby(['Chr', 'Strand', 'exonChain', 'category'], as_index=False).agg({
-            'TrStart': tuple,
-            'TrEnd': tuple
-        }).reset_index(drop=True)
-        df['frequency'] = df['TrStart'].apply(len)
-
+        df = pd.concat([df[['Chr','Strand','exonChain','category','TrStart','TrEnd']],
+                    df_rescue[['Chr','Strand','exonChain','category','TrStart','TrEnd']]],ignore_index = True).reset_index(drop = True)  
         return df
     
     
@@ -260,79 +118,105 @@ class GTFRescueTSS:
         return df
     
 
+#     def ism_filter(self, df):
+#         """
+#         ISM filter
+#         """   
+#         truncationprocessor = TruncationProcessor(num_processes = self.num_processes)
+#         df = truncationprocessor.get_truncation(df)
+#         Chr_Strand_mean_Freq = pd.DataFrame(df.groupby(['Chr','Strand'])['frequency'].apply('mean')).reset_index()
+
+#         def remove_ism_for_row(row):
+#             threshold_freq = Chr_Strand_mean_Freq[
+#                 (Chr_Strand_mean_Freq['Chr'] == row['Chr']) & 
+#                 (Chr_Strand_mean_Freq['Strand'] == row['Strand'])
+#             ].iloc[0]['frequency']
+
+#             if row['truncation_source'] != 'n' and row['frequency'] <= 2:
+#                 return 0
+#             if row['truncation_source'] == 'n' and row['frequency'] < threshold_freq * self.ism_freqRatio_notrun:
+#                 return 0
+#             return 1
+
+#         df_ism = df[df['category'] == 'ISM'].copy()
+#         df_ism['remove'] = df_ism.apply(remove_ism_for_row, axis=1)
+#         remove_index = df_ism[df_ism['remove'] == 0].index
+#         df = df.drop(index=remove_index).copy()
+
+#         # 删除不再需要的列
+#         return df.drop(columns=['sourceIso_num', 'trun_source_freq', 'truncation_source'], errors='ignore')
+
+
+
+#     def nic_filter(self, df):
+#         """
+#         NIC filter
+#         """
+#         Chr_Strand_mean_Freq = pd.DataFrame(df.groupby(['Chr','Strand'])['frequency'].apply('mean')).reset_index()
+#         df['Group_freq'] = df.groupby(['Chr', 'Strand', 'Group'])['frequency'].transform('sum')
+
+#         def remove_nic_for_row(row):
+#             threshold_freq = Chr_Strand_mean_Freq.loc[
+#                 (Chr_Strand_mean_Freq['Chr'] == row['Chr']) & 
+#                 (Chr_Strand_mean_Freq['Strand'] == row['Strand']), 'frequency'
+#             ].values[0]
+
+
+#             if row['frequency'] < threshold_freq * self.nic_freqratio_mean or row['frequency'] < row['Group_freq'] * self.nic_freqratio_group:
+#                 return 0
+#             return 1
+
+#         df_nic = df[df['category'] == 'NIC'].copy()
+#         df_nic['remove'] = df_nic.apply(remove_nic_for_row, axis=1)
+#         remove_index = df_nic[df_nic['remove'] == 0].index
+#         return df.drop(index=remove_index).copy()
+
+
+#     def nnc_filter(self, df):
+#         """
+#         NNC filter
+#         """
+#         Chr_Strand_mean_Freq = pd.DataFrame(df.groupby(['Chr','Strand'])['frequency'].apply('mean')).reset_index()
+#         df['Group_freq'] = df.groupby(['Chr','Strand','Group'])['frequency'].transform('sum')
+
+#         def remove_nnc_for_row(row):
+#             threshold_freq = Chr_Strand_mean_Freq[
+#                 (Chr_Strand_mean_Freq['Chr'] == row['Chr']) & 
+#                 (Chr_Strand_mean_Freq['Strand'] == row['Strand'])
+#             ].iloc[0]['frequency']
+
+#             if row['frequency'] < threshold_freq * self.nnc_freqratio_mean or row['frequency'] < row['Group_freq'] * self.nnc_freqratio_group:
+#                 return 0
+#             return 1
+
+#         df_nnc = df[df['category'] == 'NNC'].copy()
+#         df_nnc['remove'] = df_nnc.apply(remove_nnc_for_row, axis=1)
+#         remove_index = df_nnc[df_nnc['remove'] == 0].index
+#         return df.drop(index=remove_index).copy()
+
+
     def ism_filter(self, df):
         """
         ISM filter
         """
-        truncationprocessor = TruncationProcessor(num_processes = self.num_processes)
-        df = truncationprocessor.get_truncation(df)
-        Chr_Strand_mean_Freq = pd.DataFrame(df.groupby(['Chr','Strand'])['frequency'].apply('mean')).reset_index()
-
-        def remove_ism_for_row(row):
-            threshold_freq = Chr_Strand_mean_Freq[
-                (Chr_Strand_mean_Freq['Chr'] == row['Chr']) & 
-                (Chr_Strand_mean_Freq['Strand'] == row['Strand'])
-            ].iloc[0]['frequency']
-
-            if row['truncation_source'] != 'n' and row['frequency'] <= 2:
-                return 0
-            if row['truncation_source'] == 'n' and row['frequency'] < threshold_freq * self.ism_freqRatio_notrun:
-                return 0
-            return 1
-
-        df_ism = df[df['category'] == 'ISM'].copy()
-        df_ism['remove'] = df_ism.apply(remove_ism_for_row, axis=1)
-        remove_index = df_ism[df_ism['remove'] == 0].index
-        df = df.drop(index=remove_index).copy()
-
-        # 删除不再需要的列
-        return df.drop(columns=['sourceIso_num', 'trun_source_freq', 'truncation_source'], errors='ignore')
-
-
+        df = df[~((df['category'] =='ISM') & (df['Group_freq_ratio'] < 0.25))].copy()
+        return df
+    
+    
     def nic_filter(self, df):
         """
         NIC filter
         """
-        Chr_Strand_mean_Freq = pd.DataFrame(df.groupby(['Chr','Strand'])['frequency'].apply('mean')).reset_index()
-        df['Group_freq'] = df.groupby(['Chr', 'Strand', 'Group'])['frequency'].transform('sum')
-
-        def remove_nic_for_row(row):
-            threshold_freq = Chr_Strand_mean_Freq[
-                (Chr_Strand_mean_Freq['Chr'] == row['Chr']) & 
-                (Chr_Strand_mean_Freq['Strand'] == row['Strand'])
-            ].iloc[0]['frequency']
-
-            if row['frequency'] < threshold_freq * self.nic_freqratio_mean or row['frequency'] < row['Group_freq'] * self.nic_freqratio_group:
-                return 0
-            return 1
-
-        df_nic = df[df['category'] == 'NIC'].copy()
-        df_nic['remove'] = df_nic.apply(remove_nic_for_row, axis=1)
-        remove_index = df_nic[df_nic['remove'] == 0].index
-        return df.drop(index=remove_index).copy()
-
-
+        df = df[~((df['category'] =='NIC') & (df['Group_freq_ratio'] < 0.05))].copy()
+        return df
+    
+    
     def nnc_filter(self, df):
         """
         NNC filter
         """
-        Chr_Strand_mean_Freq = pd.DataFrame(df.groupby(['Chr','Strand'])['frequency'].apply('mean')).reset_index()
-        df['Group_freq'] = df.groupby(['Chr','Strand','Group'])['frequency'].transform('sum')
-
-        def remove_nnc_for_row(row):
-            threshold_freq = Chr_Strand_mean_Freq[
-                (Chr_Strand_mean_Freq['Chr'] == row['Chr']) & 
-                (Chr_Strand_mean_Freq['Strand'] == row['Strand'])
-            ].iloc[0]['frequency']
-
-            if row['frequency'] < threshold_freq * self.nnc_freqratio_mean or row['frequency'] < row['Group_freq'] * self.nnc_freqratio_group:
-                return 0
-            return 1
-
-        df_nnc = df[df['category'] == 'NNC'].copy()
-        df_nnc['remove'] = df_nnc.apply(remove_nnc_for_row, axis=1)
-        remove_index = df_nnc[df_nnc['remove'] == 0].index
-        return df.drop(index=remove_index).copy()
+        df = df[~((df['category'] =='NNC') & (df['Group_freq_ratio'] < 0.05))].copy()
+        return df
     
 
     def anno_TS_prediction_correct(self, df, ref_anno):
@@ -427,6 +311,329 @@ class GTFRescueTSS:
         return df
     
     
+    def find_nearest_exon(self,ref_sites, query_sites):
+        """使用二分查找找到每个 query 对应的最近匹配位点"""
+        mapped_sites = []
+        for q in query_sites:
+            idx = bisect.bisect_left(ref_sites, q)
+
+            # 处理边界情况
+            if idx == 0:  # query 在最左边
+                mapped_sites.append(ref_sites[0])
+            elif idx == len(ref_sites):  # query 在最右边
+                mapped_sites.append(ref_sites[-1])
+            else:  # query 在中间，选择最近的点
+                before = ref_sites[idx - 1]
+                after = ref_sites[idx]
+                mapped_sites.append(before if abs(q - before) <= abs(q - after) else after)
+
+        return mapped_sites
+
+    
+    def is_within_littleExon_range(self,lst, lower, upper):
+        """
+        判断列表中的位点是否全部落在小exon区域内
+        """
+        return all(lower <= x <= upper for x in lst)
+    
+        
+    def correct_exonChain(self, row, dict_correct, df1):
+        """
+        dict_correct ： {整条错误exonChain : 纠正exonChain}
+        纠正exonChain： 满足以下即纠正：
+            1. 纠正后为FSM
+            2. 纠正后为FSM的截断
+        """
+
+        FSM_exonChain = df1[
+            (df1['Chr'] == row['Chr']) & 
+            (df1['Strand'] == row['Strand']) & 
+            (df1['Group'] == row['Group']) & 
+            (df1['category'] == 'FSM')
+        ]['exonChain'].tolist()
+
+        corrected_exonChain = dict_correct.get(row['key'])
+
+        if corrected_exonChain:
+            if corrected_exonChain in FSM_exonChain or any(corrected_exonChain in fsm for fsm in FSM_exonChain):
+                return corrected_exonChain
+
+        return row['exonChain']
+
+
+    
+    def correct_for_Chr(self, df1):
+        """
+        单条染色体进行 nnc/nic correct
+        """
+        df = df1.copy()
+        
+        # 过滤不需要矫正的group 过滤:不含FSM 或只含FSM和ISM
+        df = df.groupby(["Chr", "Strand", "Group"]).filter(lambda g: any(g["category"] == 'FSM'))
+        df = df.groupby(["Chr", "Strand", "Group"]).filter(lambda g: "NIC" in g["category"].values or "NNC" in g["category"].values)
+    
+        df['exonChain2'] = df['exonChain'].apply(lambda x: tuple(map(int, x.split('-'))))
+        df['exonChain2_tuple'] = df['exonChain2'].apply(lambda x: [(x[i], x[i+1]) for i in range(0, len(x), 2)])
+        
+        correct_dict = {}
+        for _,df_group in df.groupby(['Chr','Strand','Group']):
+            df_ref_exonChain = df_group[df_group['category'] == 'FSM'].copy()
+            df_group_NNC_NIC = df_group[df_group['category'].isin(['NNC','NIC'])].copy()
+
+            # 获取小exon路径
+            ref_exon = set([(exonC[i],exonC[i+1]) for exonC in df_ref_exonChain['exonChain2'].tolist() for i in range(1,len(exonC)-1,2)])
+            ref_little_exon = [tup for tup in ref_exon if abs(tup[1] - tup[0]) < self.little_exon_bp]
+            ref_little_exon_path = []
+            for little_exon in ref_little_exon:
+                for exonC2 in df_ref_exonChain['exonChain2']:
+                    # ref的exonChain包含小exon
+                    if len(set(little_exon) & set(exonC2)) == 2:
+                        indx1 = exonC2.index(little_exon[0])
+                        indx2 = exonC2.index(little_exon[1])
+                        ref_little_exon_path.append(tuple(exonC2[indx1-1:indx2+2]))
+
+            ref_little_exon_path = set(ref_little_exon_path)
+            
+            # 是否含有小exon
+            correcting_NIC = False
+            if len(ref_little_exon_path) > 0:
+                correcting_NIC = True
+
+            # 获取所有FSM的位点
+            ref_sites = sorted(set(s for exonC in df_ref_exonChain['exonChain2'] for s in exonC))
+
+            for _,row in df_group_NNC_NIC.iterrows():
+
+                ###############
+                # NIC校正  小exon跳跃
+                if row['category'] == 'NIC' and correcting_NIC:
+                    skip_row = False
+
+                    # print('-'*10)
+                    # print(ref_little_exon_path)
+                    for little_exon_path in ref_little_exon_path:
+                        # 小exon跳跃
+                        if len(set(little_exon_path[1:-1]) - set(row['exonChain2'])) == 2 and \
+                            len(set([little_exon_path[0],little_exon_path[-1]]) & set(row['exonChain2'])) == 2:
+
+                            error_path = row['Chr'] + row['Strand'] + '_' + row['exonChain']
+                            correct_path = row['exonChain'].replace('-'.join(list(map(str,[little_exon_path[0],little_exon_path[-1]]))),
+                                                                    '-'.join(list(map(str,little_exon_path))))
+
+                            correct_dict[error_path] = correct_path
+                            skip_row = True
+
+                            # print('小exon跳跃' ,error_path)
+                            # print(correct_path)
+                            break
+
+                    if skip_row:
+                        continue
+
+
+                #################
+                # NNC校正： 小exon错配，凹陷/凸起，exon偏移， 假exon
+                elif row['category'] == 'NNC':
+                    skip_row = False
+
+                    # print('-'*10)
+                    # print(ref_little_exon_path)
+                    # 二分查找法匹配每个位点最近的匹配位点
+                    NNCnic_exonChain = list(row['exonChain2'])
+                    mapped = self.find_nearest_exon(ref_sites, NNCnic_exonChain)
+
+                    # 和ref不同的sites
+                    diff_sites = sorted(set(NNCnic_exonChain) - set(mapped))
+                    # 对应的匹配位点
+                    diff_sites_ref = [mapped[NNCnic_exonChain.index(diff)] for diff in diff_sites]
+
+                    ##########################
+                    # 1. 小exon错配
+                    # ref存在小exon
+                    if correcting_NIC:
+                        for little_exon_path in ref_little_exon_path:
+                            # 错误位点位于小exon区域
+                            if self.is_within_littleExon_range(diff_sites, little_exon_path[0], little_exon_path[-1]):
+                                error_path = row['Chr'] + row['Strand'] + '_' + row['exonChain']
+
+                                # 单端错配
+                                if len(diff_sites) == 1:
+                                    # 左边错配
+                                    if diff_sites_ref[0] == little_exon_path[0]:
+                                        correct_path = row['exonChain'].replace('-'.join(list(map(str,[diff_sites[0],little_exon_path[-1]]))),
+                                                                                '-'.join(list(map(str,little_exon_path))))
+                                        correct_dict[error_path] = correct_path
+                                        skip_row = True
+                                        
+                                        # print('左边错配',error_path)
+                                        # print(correct_path)
+                                        break
+
+
+                                    # 右边错配
+                                    elif diff_sites_ref[0] == little_exon_path[-1]:
+                                        correct_path = row['exonChain'].replace('-'.join(list(map(str,[little_exon_path[0],diff_sites[0]]))),
+                                                                                '-'.join(list(map(str,little_exon_path))))
+                                        correct_dict[error_path] = correct_path
+                                        skip_row = True
+                                        
+                                        # print('右边错配',error_path)
+                                        # print(correct_path)
+                                        break
+
+
+                                # 双端错配
+                                elif len(diff_sites) == 2:
+                                    if diff_sites_ref[0] == little_exon_path[0] and diff_sites_ref[1] == little_exon_path[-1]:
+                                        correct_path = row['exonChain'].replace('-'.join(list(map(str,diff_sites))),
+                                                                                '-'.join(list(map(str,little_exon_path))))
+                                        correct_dict[error_path] = correct_path
+                                        skip_row = True
+
+                                        # print('双端错配',error_path)
+                                        # print(correct_path)
+                                        break
+
+                    if skip_row:
+                        continue
+
+                    ################
+                    # 2. 凹陷/凸起  发生在非小exon附近
+                    # 和匹配的ref相差 20bp； freq/group freq < 0.25
+                    if len(diff_sites) == 1 and abs(diff_sites[0] - diff_sites_ref[0]) < self.mismatch_error_sites_bp:
+                        group_freq = df_group[df_group['source'] == 'data']['frequency'].sum()
+
+                        if row['frequency']/group_freq < self.mismatch_error_sites_groupfreq_multiple:
+                            error_path = row['Chr'] + row['Strand'] + '_' + row['exonChain']
+                            correct_path = '-'.join(list(map(str,mapped)))
+
+                            correct_dict[error_path] = correct_path
+
+                            # print('凹陷凸起错配',error_path)
+                            # print(correct_path)
+                            continue
+
+                    ################
+                    # 3. exon偏移
+                    # 偏移量差值小于20bp
+                    elif len(diff_sites) == 2 and '-'.join(list(map(str,diff_sites))) in row['exonChain']:
+                        excursion = [a - b for a, b in zip(diff_sites, diff_sites_ref)]
+                        if ((excursion[0] >0 and excursion[1] >0) or (excursion[0] <0 and excursion[1] <0)) and \
+                            abs(excursion[0] - excursion[1]) < self.exon_excursion_diff_bp:
+
+                            error_path = row['Chr'] + row['Strand'] + '_' + row['exonChain']
+                            correct_path = row['exonChain'].replace('-'.join(list(map(str,diff_sites))),
+                                                                    '-'.join(list(map(str,diff_sites_ref))))
+
+                            correct_dict[error_path] = correct_path
+
+                            # print('exon错配',error_path)
+                            # print(correct_path)
+                            continue
+
+                    ################
+                    # 4. 假exon
+                    # 最后一个exon长度小于50, freq/group freq < 0.1
+                    if len(diff_sites) >=2:
+                        group_freq = df_group[df_group['source'] == 'data']['frequency'].sum()
+
+                        counter = Counter(mapped)
+                        duplicates = [k for k, v in counter.items() if v >= 2]
+
+                        # 正链假exon
+                        if len(duplicates) == 1 and row['Strand'] == '+':
+                            index = mapped.index(duplicates[0]) # 第一个匹配的值
+                            tail_sites = mapped[index:]
+
+                            if len(set(tail_sites)) == 1 and tail_sites[0] == duplicates[0] and \
+                                row['frequency'] / group_freq < self.fake_exon_group_freq_multiple and \
+                                abs(row['exonChain2'][-1] - int(np.mean(row['TrEnd']))) < self.fake_exon_bp:
+
+                                error_path = row['Chr'] + row['Strand'] + '_' + row['exonChain']
+                                correct_path = '-'.join(list(map(str,mapped[:index+1])))
+                                correct_dict[error_path] = correct_path
+
+                                # print('假exon',error_path)
+                                # print(correct_path)
+
+
+                        # 负链假exon
+                        if len(duplicates) == 1 and row['Strand'] == '-':
+                            index = mapped.index(duplicates[0]) # 最后一个匹配的值
+                            index = len(mapped) - 1 - mapped[::-1].index(duplicates[0])
+                            tail_sites = mapped[:index]
+
+                            if len(set(tail_sites)) == 1 and tail_sites[0] == duplicates[0] and \
+                                row['frequency'] / group_freq < self.fake_exon_group_freq_multiple and \
+                                abs(row['exonChain2'][0] - int(np.mean(row['TrStart']))) < self.fake_exon_bp:
+
+                                error_path = row['Chr'] + row['Strand'] + '_' + row['exonChain']
+                                correct_path = '-'.join(list(map(str,mapped[index:])))
+                                correct_dict[error_path] = correct_path
+
+                                # print('假exon',error_path)
+                                # print(correct_path)
+        
+        
+        # 校正
+        df1['key'] = df1['Chr'] + df1['Strand'] + '_' + df1['exonChain']
+        df1['exonChain'] = df1.apply(lambda row : self.correct_exonChain(row, correct_dict, df1),axis = 1)
+        
+        # 整理数据
+        df1 = df1[df1['source'] == 'data'].copy()
+        df1 = df1[['Chr','Strand','exonChain','TrStart','TrEnd','Group']].copy()
+        
+        df1 = df1.explode(['TrStart', 'TrEnd'], ignore_index=True)
+        df1 = df1.groupby(['Chr', 'Strand', 'exonChain', 'Group'],
+                        as_index=False).agg({
+                            'TrStart': list,
+                            'TrEnd': list
+                        }).reset_index(drop=True)
+
+        return df1
+                    
+            
+            
+            
+    def correct(self, df, ref_anno):
+        """
+        nnc/nic correct
+        """
+        df = df[['Chr','Strand','exonChain','category','TrStart','TrEnd']].copy()
+        df['key'] = df['Chr'] + df['Strand'] + df['exonChain']
+        
+        ref_anno = ref_anno.copy()
+        ref_anno['key'] = ref_anno['Chr'] + ref_anno['Strand'] + ref_anno['exonChain']
+        ref_anno['category'] = 'FSM'
+        # 注释中未表达的exonChain添加到df中
+        ref_anno = ref_anno[~ref_anno['key'].isin(df['key'])]
+        
+        df['source'] = 'data'
+        ref_anno['source'] = 'ref'
+        
+        df['frequency'] = df['TrStart'].apply(len)
+        ref_anno['frequency'] = 1
+        
+        df = pd.concat([df,ref_anno],ignore_index = True).reset_index(drop = True)  
+        
+        # 聚类
+        gene_clustering = GeneClustering(num_processes=self.num_processes)
+        df = gene_clustering.cluster(df)
+        
+        # 去除只含ref的group
+        df = df.groupby(['Chr', 'Strand', 'Group']).filter(lambda g: not all(g['source'] == 'ref'))
+        
+        # 多线程
+        chr_grouped = [chr_group for _, chr_group in df.groupby('Chr')]
+
+        with mp.Pool(self.num_processes) as pool:
+            results = pool.map(self.correct_for_Chr, chr_grouped)
+
+        df = pd.concat(results, ignore_index=True)
+        
+        return df
+        
+    
     def anno_process(self,df_raw,df,ref_anno):
         # 获取分类
         if 'category' in df.columns:
@@ -438,35 +645,37 @@ class GTFRescueTSS:
         ################
         ## 1. rescue
         df = self.rescue_fsm(df_raw,df,ref_anno)
-        df.to_parquet('SIRV_PB.parquet')
+        
         
         #############
-        ## 2. NNC correct
-        df = self.nnc_correct(df,ref_anno)
+        ## 2. NNC/NIC correct
+        df = self.correct(df,ref_anno)
         
-        ##########                        
-        ## 3. NIC correct
-        df = self.nic_correct(df,ref_anno)
+        isoformclassifier = IsoformClassifier(num_processes = self.num_processes)
+        df = isoformclassifier.add_category(df,ref_anno)
         
         #############
-        ## 4. 碎片段
+        ## 3. 碎片段
         df = self.filter_groups(df,ref_anno)
         
+        df['Group_freq'] = df.groupby(['Chr', 'Strand', 'Group'])['frequency'].transform('sum')
+        df['Group_freq_ratio'] = df.apply(lambda row: row['frequency'] / row['Group_freq'] if row['Group_freq'] != 0 else 0, axis=1)
+        
         #############
-        ## 5. ISM filter
+        ## 4. ISM filter
         df = self.ism_filter(df)
         
         #############
-        ## 6. NIC filter
+        ## 5. NIC filter
         df = self.nic_filter(df)
         
         #############
-        ## 7. NNC filter
+        ## 6. NNC filter
         df = self.nnc_filter(df)
         
+        
         ##########################
-        ## 8. TS prediction
+        ## 7. TS prediction
         df = self.anno_TS_prediction_correct(df, ref_anno)
         
         return df
-        

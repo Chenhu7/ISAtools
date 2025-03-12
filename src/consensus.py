@@ -2,12 +2,6 @@ import pandas as pd
 import multiprocessing as mp
 from functools import partial
 
-
-import pandas as pd
-import multiprocessing as mp
-from functools import partial
-
-
 class ConsensusFilter:
     """
     处理Consensus的过滤逻辑。
@@ -75,20 +69,17 @@ class ConsensusFilter:
                 total_freq=('frequency', 'sum')
             ).reset_index()
 
-            grouped_df = grouped_df.sort_values(['site_group', 'count', 'min_order'], ascending=[True, False, True])
-            consensus_sites_list = []
+            # 只处理含有多个相似位点的组
+            grouped_df = grouped_df.groupby('site_group').filter(lambda x: len(x) > 1)
+            grouped_df = grouped_df.sort_values(['site_group', 'total_freq','count'], ascending=[True, False,False])
             error_sites = []
-
+            # freq/ref相似位点freq < 0.1
             for _, group in grouped_df.groupby('site_group'):
-                if len(group) > 1:
-                    ref_freq = group.iloc[0]['total_freq']
-                    for index, row in group.iloc[1:].iterrows():
-                        if row['total_freq'] / ref_freq >= self.consensus_multiple:
-                            consensus_sites_list.append(row['site'])
-                        else:
-                            error_sites.append(row['site'])
-                else:
-                    consensus_sites_list.append(group.iloc[0]['site'])
+                # if df_group_freq >= 0:
+                ref_freq = group.iloc[0]['total_freq']
+                for index, row in group.iloc[1:].iterrows():
+                    if row['total_freq'] / ref_freq < self.consensus_multiple:
+                        error_sites.append(row['site'])
 
             for index, row in df_group.iterrows():
                 if len(set(row['exonChain_list']) & set(error_sites)) >= 1:
@@ -96,7 +87,7 @@ class ConsensusFilter:
 
         return df.drop(remove_index)
 
-    
+
     def consensus(self, df):
         """
         对输入数据进行 Consensus 筛选。
@@ -114,4 +105,3 @@ class ConsensusFilter:
         # 合并结果
         df_return = pd.concat(results, ignore_index=True)
         return df_return
-    
