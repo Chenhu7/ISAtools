@@ -4,236 +4,122 @@ import multiprocessing
 import re
 import subprocess
 import os
+import gc
+import glob
 from src.gene_grouping import GeneClustering
 
-# import pandas as pd
-# import multiprocessing
-# import re
-# import subprocess
-# from Bio import SeqIO
-
-# def load_fasta(file):
-#     """
-#     使用 BioPython 高效加载 FASTA 文件，返回字典 {read_id: sequence}
-#     """
-#     return {record.id: str(record.seq) for record in SeqIO.parse(file, "fasta")}
-
-
-# def process_bam_line(line):
-#     """
-#     解析BAM文件中的单行记录，返回处理后的结果
-#     """
-#     cols = line.strip().split("\t")
-#     read_id = cols[0]
-#     chr_name = cols[2]
-#     strand = "+" if (int(cols[1]) & 0x10) == 0 else "-"
-#     cigar = cols[5]
-#     sequence = cols[9]
-
-#     positions = []
-#     current_pos = int(cols[3])
-#     coverage = 0
-#     mismatches = 0
-
-#     for token in re.findall(r"(\d+)([MIDNSHP=X])", cigar):
-#         length, op = int(token[0]), token[1]
-#         if op in "M=X":
-#             coverage += length
-#             current_pos += length
-#         elif op == "N":
-#             positions.append((current_pos, current_pos + length - 1))
-#             current_pos += length
-#         elif op == "I":
-#             coverage += length
-
-#     positions.append((int(cols[3]), current_pos - 1))
-#     identity = 1 - (mismatches / coverage if coverage > 0 else 0)
-
-#     exon_chain = "-".join(f"{start}-{end}" for start, end in positions)
-#     return {
-#         "read_id": read_id,
-#         "Chr": chr_name,
-#         "Strand": strand,
-#         "exonChain": exon_chain,
-#         "identity": identity,
-#         "coverage": coverage / len(sequence) if len(sequence) > 0 else 0,
-#     }
-
-
-# def parse_bam_multiprocess(bam_file, num_processes=4):
-#     """
-#     并行解析BAM文件，返回解析后的DataFrame和exonChain统计信息
-#     """
-#     ec = {}
-#     eci = {}
-
-#     # 运行samtools view命令获取BAM内容
-#     process = subprocess.Popen(
-#         ["samtools", "view", bam_file],
-#         stdout=subprocess.PIPE,
-#         text=True,
-#     )
-
-#     # 多进程处理
-#     pool = multiprocessing.Pool(num_processes)
-#     results = pool.imap(process_bam_line, process.stdout)
-
-#     parsed_data = []
-#     for result in results:
-#         parsed_data.append(result)
-#         exon_key = f"{result['Chr']}\t{result['Strand']}\t{result['exonChain']}"
-#         ec[exon_key] = ec.get(exon_key, 0) + 1
-#         eci[exon_key] = eci.get(exon_key, 0) + result["identity"]
-
-#     pool.close()
-#     pool.join()
-
-#     return pd.DataFrame(parsed_data), ec, eci
-
-
-# def parse_and_merge(fasta_file, bam_file, num_processes=4):
-#     """
-#     解析FASTA和BAM文件，并合并解析结果，返回最终的DataFrame
-#     """
-#     fa = load_fasta(fasta_file)
-#     bam_parsed, ec, eci = parse_bam_multiprocess(bam_file, num_processes)
-
-#     # 处理junction统计
-#     junction_data = []
-#     for key, count in ec.items():
-#         chr_name, strand, exon_chain = key.split("\t")
-#         mean_identity = eci[key] / count
-#         junction_data.append([chr_name, strand, exon_chain, count, mean_identity])
-
-#     df_junction = pd.DataFrame(
-#         junction_data, columns=["Chr", "Strand", "exonChain", "junction", "identity"]
-#     )
-
-#     # 合并数据
-#     merged_df = bam_parsed.merge(
-#         df_junction, on=["Chr", "Strand", "exonChain"], how="left"
-#     )
-#     return merged_df.dropna()
-
-
-def run_bam2exonchain(reference, bam, output_flnc, output_count):
+def run_bam2ssc(reference, bam, output_ssc,num_threads):
     """
-    调用 BAM2exonChain.pl 脚本生成 exonChain 数据文件
+    bam2ssc
     """
-    current_dir = os.path.dirname(os.path.realpath(__file__))  # 获取当前脚本所在路径
-    bam2exonchain_script = os.path.join(current_dir, 'BAM2exonChain.pl')
-    cmd = [
-        "perl",
-        bam2exonchain_script,
-        reference,
-        bam,
-        output_flnc,
-        output_count,
-    ]
-    print(cmd)
-    try:
-        subprocess.run(cmd, check=True)
-        # print(f"BAM2exonChain.pl 运行成功！生成文件：\n{output_flnc}\n{output_count}")
-    except subprocess.CalledProcessError as e:
-        print(f"运行 BAM2exonChain.pl 时出错: {e}")
-        raise
+    current_dir = os.path.dirname(os.path.realpath(__file__))
+    bam2SSC_script = os.path.join(current_dir, 'bam2ssc.py')
+    cmd = ["python", bam2SSC_script,
+        "-r", reference,
+        "-b", *bam,
+        "-o", output_ssc,
+        "-t", str(num_threads)]
+    
+    subprocess.run(cmd, check=True)
 
-
-def run_Ref2exonChain(gtf_anno, output):
+def run_Ref2SSC(gtf_anno, output,num_threads):
     """
-    调用 processRef2exonChain.pl 脚本生成 exonChain 数据文件
+    anno2ssc
     """
-    # 创建输出目录
-    process_dir = os.path.join(output, "process")
+    process_dir = os.path.join(output, "temp")
     os.makedirs(process_dir, exist_ok=True)
 
-    # 输出文件路径
-    output_exonchain = os.path.join(process_dir, "anno.exonChain")
-
-    # 构造命令
+    output_SSC = os.path.join(process_dir, "anno.ssc")
     current_dir = os.path.dirname(os.path.realpath(__file__))
-    process_script = os.path.join(current_dir,'processRef2exonChain.pl')
-    cmd = f"perl {process_script} {gtf_anno} | awk '$8!=\"NA\"' > {output_exonchain}"
+    gtf2SSC_script = os.path.join(current_dir,'gtf2ssc.py')
+    cmd = ["python", gtf2SSC_script,
+        "-i", gtf_anno,
+        "-o", output_SSC,
+        "-w", str(num_threads)]
+    subprocess.run(cmd, check=True)
+
+def process_data(flnc_path, count_path, df_raw_path, min_aln_coverage=None, min_aln_identity=None):
+    """
+    read preprocessing
+    """
+    dtypes_flnc = {
+        1: "category",  # Chr
+        2: "category",  # Strand
+        3: "int32",     # TrStart_reads
+        4: "int32",     # TrEnd_reads
+        5: str,         # SSC
+        6: "float32",   # identity
+        7: "float32"    # coverage
+    }
+
+    df_flnc = pd.read_csv(
+        flnc_path,
+        sep="\t",
+        header=None,
+        dtype=dtypes_flnc,
+        usecols=[1, 2, 3, 4, 5, 6, 7],low_memory=True
+    )
+    df_flnc.columns = ["Chr", "Strand", "TrStart_reads", "TrEnd_reads", "SSC", "identity", "coverage"]
+
+    if min_aln_coverage is not None and min_aln_identity is not None:
+        df_flnc = df_flnc[(df_flnc["identity"] >= min_aln_identity) & (df_flnc["coverage"] >= min_aln_coverage)]
     
-    try:
-        # 执行命令
-        subprocess.run(cmd, shell=True, check=True, executable='/bin/bash')
-        # print(f"processRef2exonChain.pl 运行成功！生成文件：{output_exonchain}")
-    except subprocess.CalledProcessError as e:
-        print(f"运行 processRef2exonChain.pl 时出错: {e}")
-        raise
+    df_flnc = df_flnc.drop(columns=["identity", "coverage"]).dropna()
 
-
-def process_data(flnc_path, count_path):
-    """
-    读取和处理 exonChain 数据
-    """
-    # 读取 flnc 文件
-    df_read = pd.read_csv(flnc_path, sep="\t", header=None)
-    df_read = df_read.dropna()  # 去除缺失值
-    df_read = df_read.drop(columns=[0, 6, 7])  # 删除无关列
-    df_read.columns = ["Chr", "Strand", "TrStart", "TrEnd", "exonChain"]
-
-    # 按照 Chr, Strand, exonChain 分组，聚合 TrStart 和 TrEnd
-    df_read = (
-        df_read.groupby(["Chr", "Strand", "exonChain"], as_index=False)
-        .agg({"TrStart": list, "TrEnd": list})
-        .reset_index(drop=True)
+    df_grouped = (
+        df_flnc.groupby(["Chr", "Strand", "SSC"], observed=True)
+        .agg({"TrStart_reads": list, "TrEnd_reads": list})
+        .reset_index()
     )
 
-    # 读取 junction count 文件
-    df_junction = pd.read_csv(count_path, sep="\t", header=None)
-    df_junction = df_junction.drop(columns=[0])  # 删除无关列
-    df_junction.columns = ["Chr", "Strand", "exonChain", "junction", "identity"]
+    df_grouped["TrStart_reads"] = df_grouped["TrStart_reads"].apply(lambda x: np.array(x, dtype=np.int32))
+    df_grouped["TrEnd_reads"] = df_grouped["TrEnd_reads"].apply(lambda x: np.array(x, dtype=np.int32))
+    df_grouped["frequency"] = df_grouped["TrStart_reads"].apply(len)
+    df_grouped.to_parquet(df_raw_path)
 
-    # 合并数据
-    df = df_read.merge(df_junction, on=["Chr", "Strand", "exonChain"], how="left")
-    df = df.dropna()  # 删除合并后可能出现的缺失值
+    del df_flnc
+    gc.collect()
+
+    df_junction = pd.read_csv(
+        count_path,
+        sep="\t",
+        header=None,
+        dtype={1: "category", 2: "category", 3: str, 4: str},
+        usecols=[1, 2, 3, 4]
+    )
+
+    df_junction.columns = ["Chr", "Strand", "SSC", "junction"]
+    df = df_grouped.merge(df_junction, on=["Chr", "Strand", "SSC"], how="inner").dropna()
+
+    del df_grouped
+    gc.collect()
 
     return df
 
-
-def load_data(reference, bam, output):
+def load_data(reference, bam, output, num_threads, min_aln_coverage, min_aln_identity):
     """
-    加载 BAM 文件并生成处理后的 exonChain 数据
-
-    参数:
-        reference: 参考基因组文件路径（FASTA 格式）
-        bam: BAM 文件路径
-        output: 输出目录，用于存放生成的文件
-
-    返回:
-        df: 处理后的 Pandas DataFrame
+    load ssc data
     """
-    
-    # 创建输出目录
-    process_dir = os.path.join(output, "process")
+    process_dir = os.path.join(output, "temp")
     os.makedirs(process_dir, exist_ok=True)
+    sample = os.path.splitext(os.path.basename(bam))[0] 
+    output_flnc = os.path.join(process_dir, f"{sample}_flnc.ssc")
+    output_count = os.path.join(process_dir, f"{sample}_ssc.count")
+    df_raw_path = os.path.join(process_dir, f"{sample}.ssc_flnc.parquet")
 
-    # 输出文件路径
-    output_flnc = os.path.join(process_dir, "flnc.exonChain")
-    output_count = os.path.join(process_dir, "exonChain.count")
+    df = process_data(
+        flnc_path=output_flnc,
+        count_path=output_count,
+        df_raw_path=df_raw_path,
+        min_aln_coverage=min_aln_coverage,
+        min_aln_identity=min_aln_identity
+    )
 
-    # 调用 BAM2exonChain.pl 脚本
-    run_bam2exonchain(reference, bam, output_flnc, output_count)
-
-    # 加载和处理数据
-    df = process_data(output_flnc, output_count)
-    df['frequency'] = df['TrStart'].apply(len)
-    
     return df
-
-
 
 def junction_screening(df, junction_freq_ratio, conservative_base=None):
     """
-    过滤掉包含非保守碱基的isoform。
-    参数:
-        df: 输入的DataFrame。
-        junction_freq_ratio: 非保守碱基的频率比率阈值。
-        conservative_base: 可选，保守碱基集合，默认为 {'GT-AG', 'AT-AC', 'GC-AG'}。
-    返回:
-        过滤后的DataFrame。
+    fiter non-canonical splice motifs
     """
     if conservative_base is None:
         conservative_base = {'GT-AG', 'AT-AC', 'GC-AG'}
@@ -241,138 +127,45 @@ def junction_screening(df, junction_freq_ratio, conservative_base=None):
         conservative_base = set(conservative_base.split(','))
     
     df = df.copy()
-
-    # 判断junction是否包含非保守碱基 忽略大小写
     def contains_non_conservative(junction_str):
         junctions = {junc.upper() for junc in junction_str.split(',')}
         return not junctions.issubset(conservative_base)
-    
-    # # 判断junction是否包含非保守碱基
-    # def contains_non_conservative(junction_str):
-    #     return not set(junction_str.split(',')).issubset(conservative_base)
-    
-    # 标记是否包含非保守碱基
+
     df['contains_non_conservative'] = df['junction'].apply(contains_non_conservative)
-    
-    # 计算Group频率总和和频率比率
-    df['Group_freq'] = df.groupby(['Chr', 'Strand', 'Group'])['frequency'].transform('sum')
+    df['Group_freq'] = df.groupby(['Chr', 'Strand', 'Group'], observed=True)['frequency'].transform('sum')
     df['freq_ratio'] = df['frequency'] / df['Group_freq']
-    
-    # 过滤包含非保守碱基且频率比率小于阈值的行
+
     df = df[~((df['contains_non_conservative']) & (df['freq_ratio'] <= junction_freq_ratio))]
-    
-    # 删除临时列
     df.drop(columns=['contains_non_conservative', 'Group_freq', 'freq_ratio'], inplace=True)
+
     return df
 
 
-def identity_filtering(df, threshold_identity):
+def filter_fragmentary_transcript(df, threshold_fragmentary_transcript_bp = 50):
     """
-    根据identity值过滤数据。
-    参数:
-        df: 输入的DataFrame。
-        threshold_identity: identity的最小阈值。
-    返回:
-        过滤后的DataFrame。
-    """
-    return df[df['identity'] >= threshold_identity].copy()
-
-
-def filter_two_exon(df, threshol_twoExon_bp = 50):
-    """
-    过滤具有两个外显子并满足特定条件的记录
-    :param df: 输入数据框
-    :param threshol_twoExon_bp: 最小外显子长度阈值（单位：bp）
+    filter fragmentary transcript
     """
     conservative_base = {'GT-AG', 'AT-AC', 'GC-AG'}
 
-    # 判断junction是否包含非保守碱基
     def contains_non_conservative(junction_str):
         return not set(junction_str.split(',')).issubset(conservative_base)
     
-    # 标记是否包含非保守碱基
     df['contains_non_conservative'] = df['junction'].apply(contains_non_conservative)
-    
-    
-    # 计算总的平均频率
     total_meanfreq = df['frequency'].sum() / len(df)
 
-    # 计算 TrStart 和 TrEnd 的均值
-    df['TrStart_mean'] = df['TrStart'].apply(np.mean)
-    df['TrEnd_mean'] = df['TrEnd'].apply(np.mean)
+    df['TrStart_mean'] = df['TrStart_reads'].apply(np.mean)
+    df['TrEnd_mean'] = df['TrEnd_reads'].apply(np.mean)
+    df['SSC2'] = df['SSC'].apply(lambda x: list(map(int, x.split('-'))))
     
-    # 解析 exonChain 为整型列表
-    df['exonChain2'] = df['exonChain'].apply(lambda x: list(map(int, x.split('-'))))
-    
-    # 计算最小转录长度 (Tr_length_min)
     df['Tr_length_min'] = df.apply(
-        lambda row: np.inf if len(row['exonChain2']) > 2 else min([
-            (row['exonChain2'][0] - row['TrStart_mean']),
-            (row['TrEnd_mean'] - row['exonChain2'][1])
+        lambda row: np.inf if len(row['SSC2']) > 2 else min([
+            (row['SSC2'][0] - row['TrStart_mean']),
+            (row['TrEnd_mean'] - row['SSC2'][1])
         ]),
         axis=1
     )
-    
-    # 过滤：外显子最小长度小于阈值，或包含非保守位点
-    df = df[~(((df['Tr_length_min'] < threshol_twoExon_bp) & (df['frequency'] < 0.01 * total_meanfreq)) |
+
+    df = df[~(((df['Tr_length_min'] < threshold_fragmentary_transcript_bp) & (df['frequency'] < 0.01 * total_meanfreq)) |
               (df['contains_non_conservative']) & (df['frequency'] < 0.01 * total_meanfreq))]
     
     return df
-
-
-def correct_NNC(df,ref_anno,num_processes = 20):
-    """
-    矫正单个位点错配10bp内的NNC--> FSM 或(NNC截断--> ISM)
-    """
-    df_anno = ref_anno.copy()
-    df = df.copy()
-    df_anno['source'] = 'ref'
-    df['source'] = 'data'
-    df_anno['exonChain_sites'] = df_anno['exonChain'].apply(lambda x: list(map(int, x.split('-'))))
-    df['exonChain_sites'] = df['exonChain'].apply(lambda x: list(map(int, x.split('-'))))
-    
-    df_merged = pd.concat([df, df_anno], axis=0, ignore_index=True)
-    
-    # 将data和ref聚类
-    gene_clustering = GeneClustering(num_processes=num_processes)
-    df_merged = gene_clustering.cluster(df_merged)
-    
-    # 去除全是ref的group
-    df_merged = df_merged.groupby(['Chr', 'Strand', 'Group']).filter(lambda group: not (group['source'] == 'ref').all())
-    
-    # 只留下NNC
-    df_merged2 = df_merged[(df_merged['category'] == "NNC") | (df_merged['category'].isna())]
-    df_merged2 = df_merged2.groupby(['Chr', 'Strand', 'Group']).filter(lambda group: not (group['source'] == 'ref').all())
-    
-    # 进行矫正
-    for _,df_group in df_merged2.groupby(['Chr', 'Strand', 'Group']):
-        df_data = df_group[df_group['source'] == 'data'].copy()
-        df_ref = df_group[df_group['source'] == 'ref'].copy()
-        
-        ref_siets = list(set(df_ref['exonChain_sites'].explode().tolist()))
-        
-        for index,row in df_data.iterrows():
-            # print(len(row['exonChain_sites']) - len(set(row['exonChain']) & set(ref_siets)))
-            if len(row['exonChain_sites']) - len(set(row['exonChain_sites']) & set(ref_siets)) == 1:
-                data_site = list(set(row['exonChain_sites']) - set(ref_siets))[0]
-                
-                # 计算差值，提取差值最小的ref位点 并替换
-                differences = [abs(data_site - ref_site) for ref_site in ref_siets]
-                
-                # 若含有差值小于10的ref sites则替换
-                if min(differences) <= 10 and data_site not in ref_siets:
-                    # 找到最小差值的索引
-                    min_diff_index = differences.index(min(differences))
-                    # 获取最小差值的数
-                    ref_site = ref_siets[min_diff_index]
-                    
-                    # df_merged.loc[index, 'exonChain_sites'] = [ref_site if x == data_site else x for x in df_merged.loc[index, 'exonChain_sites']]
-                    df_merged.loc[index, 'exonChain'] = df_merged.loc[index, 'exonChain'].replace(str(data_site),str(ref_site))
-
-    df_return = df_merged[df_merged['source'] == 'data'].copy()
-    
-    df_return = df_return.explode(['TrStart', 'TrEnd'], ignore_index=True)
-    df_return = df_return.groupby(['Chr', 'Strand', 'Group', 'exonChain'],as_index=False).agg({'TrStart': list,'TrEnd': list}).reset_index(drop=True)
-    df_return['frequency'] = df_return['TrStart'].apply(len)
-    
-    return df_return

@@ -19,7 +19,7 @@ class GTFRescueTSS:
                  fake_exon_group_freq_multiple=0.1,
                  fake_exon_bp=50,
                  
-                 two_exon_FreqRatio=1,
+                 # two_exon_FreqRatio=1,
                  ism_freqRatio_notrun=4,
                  nic_freqratio_mean=0.1, nic_freqratio_group=0.25,
                  nnc_freqratio_mean=0.1, nnc_freqratio_group=0.25,
@@ -36,7 +36,7 @@ class GTFRescueTSS:
         self.fake_exon_group_freq_multiple=fake_exon_group_freq_multiple
         self.fake_exon_bp=fake_exon_bp
         
-        self.two_exon_FreqRatio = two_exon_FreqRatio
+        # self.two_exon_FreqRatio = two_exon_FreqRatio
         self.ism_freqRatio_notrun = ism_freqRatio_notrun
         self.nic_freqratio_mean = nic_freqratio_mean
         self.nic_freqratio_group = nic_freqratio_group
@@ -53,9 +53,9 @@ class GTFRescueTSS:
         """
         FSM rescue
         """
-        ref_anno["key"] = ref_anno["Chr"] + ref_anno["Strand"] + ref_anno["exonChain"]
-        df_raw["key"] = df_raw["Chr"] + df_raw["Strand"] + df_raw["exonChain"]
-        df["key"] = df["Chr"] + df["Strand"] + df["exonChain"]
+        ref_anno["key"] = ref_anno["Chr"].astype(str) + ref_anno["Strand"].astype(str) + ref_anno["exonChain"].astype(str)
+        df_raw["key"] = df_raw["Chr"].astype(str) + df_raw["Strand"].astype(str) + df_raw["exonChain"].astype(str)
+        df["key"] = df["Chr"].astype(str) + df["Strand"].astype(str) + df["exonChain"].astype(str)
 
         df_rescue = df_raw[
             df_raw["key"].isin(ref_anno["key"]) & ~df_raw["key"].isin(df["key"])
@@ -74,7 +74,7 @@ class GTFRescueTSS:
         gene_clustering = GeneClustering(num_processes=self.num_processes)
         df = gene_clustering.cluster(df)
         
-        df['key'] = df['Chr'] + df['Strand'] + df['exonChain']
+        df['key'] = df['Chr'].astype(str) + df['Strand'].astype(str) + df['exonChain'].astype(str)
         df['frequency'] = df['TrStart'].apply(len)
         df['ref'] = df['key'].isin(ref_anno['key']).astype(int)
         
@@ -82,10 +82,10 @@ class GTFRescueTSS:
         remove_group = []
 
         # 计算每个 Chr-Strand 的频率均值
-        Chr_Strand_mean_Freq = pd.DataFrame(df.groupby(['Chr','Strand'])['frequency'].apply('mean')).reset_index()
+        Chr_Strand_mean_Freq = pd.DataFrame(df.groupby(['Chr','Strand'],observed=False)['frequency'].apply('mean')).reset_index()
 
         # 按 Chr-Strand-Group 分组
-        for (chr_, strand_, group), df_group in df.groupby(['Chr', 'Strand', 'Group']):
+        for (chr_, strand_, group), df_group in df.groupby(['Chr', 'Strand', 'Group'],observed=False):
             # 如果组内没有 ref == 1，则进行检查
             if 1 not in set(df_group['ref']):
                 # 获取当前组的频率均值
@@ -110,7 +110,7 @@ class GTFRescueTSS:
         df['group_key'] = df.apply(lambda row: f"{row['Chr']}{row['Strand']}{row['Group']}", axis=1)
 
         # 过滤掉标记的组
-        df = df[~df['group_key'].isin(remove_group)].copy()
+        df = df[~df['group_key'].isin(remove_group)]
 
         # 删除临时列
         df = df.drop(columns='group_key')
@@ -118,88 +118,12 @@ class GTFRescueTSS:
         return df
     
 
-#     def ism_filter(self, df):
-#         """
-#         ISM filter
-#         """   
-#         truncationprocessor = TruncationProcessor(num_processes = self.num_processes)
-#         df = truncationprocessor.get_truncation(df)
-#         Chr_Strand_mean_Freq = pd.DataFrame(df.groupby(['Chr','Strand'])['frequency'].apply('mean')).reset_index()
-
-#         def remove_ism_for_row(row):
-#             threshold_freq = Chr_Strand_mean_Freq[
-#                 (Chr_Strand_mean_Freq['Chr'] == row['Chr']) & 
-#                 (Chr_Strand_mean_Freq['Strand'] == row['Strand'])
-#             ].iloc[0]['frequency']
-
-#             if row['truncation_source'] != 'n' and row['frequency'] <= 2:
-#                 return 0
-#             if row['truncation_source'] == 'n' and row['frequency'] < threshold_freq * self.ism_freqRatio_notrun:
-#                 return 0
-#             return 1
-
-#         df_ism = df[df['category'] == 'ISM'].copy()
-#         df_ism['remove'] = df_ism.apply(remove_ism_for_row, axis=1)
-#         remove_index = df_ism[df_ism['remove'] == 0].index
-#         df = df.drop(index=remove_index).copy()
-
-#         # 删除不再需要的列
-#         return df.drop(columns=['sourceIso_num', 'trun_source_freq', 'truncation_source'], errors='ignore')
-
-
-
-#     def nic_filter(self, df):
-#         """
-#         NIC filter
-#         """
-#         Chr_Strand_mean_Freq = pd.DataFrame(df.groupby(['Chr','Strand'])['frequency'].apply('mean')).reset_index()
-#         df['Group_freq'] = df.groupby(['Chr', 'Strand', 'Group'])['frequency'].transform('sum')
-
-#         def remove_nic_for_row(row):
-#             threshold_freq = Chr_Strand_mean_Freq.loc[
-#                 (Chr_Strand_mean_Freq['Chr'] == row['Chr']) & 
-#                 (Chr_Strand_mean_Freq['Strand'] == row['Strand']), 'frequency'
-#             ].values[0]
-
-
-#             if row['frequency'] < threshold_freq * self.nic_freqratio_mean or row['frequency'] < row['Group_freq'] * self.nic_freqratio_group:
-#                 return 0
-#             return 1
-
-#         df_nic = df[df['category'] == 'NIC'].copy()
-#         df_nic['remove'] = df_nic.apply(remove_nic_for_row, axis=1)
-#         remove_index = df_nic[df_nic['remove'] == 0].index
-#         return df.drop(index=remove_index).copy()
-
-
-#     def nnc_filter(self, df):
-#         """
-#         NNC filter
-#         """
-#         Chr_Strand_mean_Freq = pd.DataFrame(df.groupby(['Chr','Strand'])['frequency'].apply('mean')).reset_index()
-#         df['Group_freq'] = df.groupby(['Chr','Strand','Group'])['frequency'].transform('sum')
-
-#         def remove_nnc_for_row(row):
-#             threshold_freq = Chr_Strand_mean_Freq[
-#                 (Chr_Strand_mean_Freq['Chr'] == row['Chr']) & 
-#                 (Chr_Strand_mean_Freq['Strand'] == row['Strand'])
-#             ].iloc[0]['frequency']
-
-#             if row['frequency'] < threshold_freq * self.nnc_freqratio_mean or row['frequency'] < row['Group_freq'] * self.nnc_freqratio_group:
-#                 return 0
-#             return 1
-
-#         df_nnc = df[df['category'] == 'NNC'].copy()
-#         df_nnc['remove'] = df_nnc.apply(remove_nnc_for_row, axis=1)
-#         remove_index = df_nnc[df_nnc['remove'] == 0].index
-#         return df.drop(index=remove_index).copy()
-
-
     def ism_filter(self, df):
         """
         ISM filter
         """
-        df = df[~((df['category'] =='ISM') & (df['Group_freq_ratio'] < 0.25))].copy()
+        # df = df[~((df['category'] =='ISM') & (df['Group_freq_ratio'] < 0.25))]
+        df = df[~((df['category'] =='ISM') & (df['Group_freq_ratio'] < self.ism_freqRatio_notrun))]
         return df
     
     
@@ -207,7 +131,9 @@ class GTFRescueTSS:
         """
         NIC filter
         """
-        df = df[~((df['category'] =='NIC') & (df['Group_freq_ratio'] < 0.05))].copy()
+        # df = df[~((df['category'] =='NIC') & (df['Group_freq_ratio'] < 0.05))]
+        df = df[~((df['category'] =='NIC') & (df['Group_freq_ratio'] < self.nic_freqratio_group))]
+        
         return df
     
     
@@ -215,102 +141,11 @@ class GTFRescueTSS:
         """
         NNC filter
         """
-        df = df[~((df['category'] =='NNC') & (df['Group_freq_ratio'] < 0.05))].copy()
+        # df = df[~((df['category'] =='NNC') & (df['Group_freq_ratio'] < 0.05))]
+        df = df[~((df['category'] =='NNC') & (df['Group_freq_ratio'] < self.nnc_freqratio_group))]
         return df
     
 
-    def anno_TS_prediction_correct(self, df, ref_anno):
-        """
-        处理终止位点的预测与参考位点的校正。
-        """
-        # 预处理 df
-        df = df[['Chr', 'Strand', 'exonChain', 'TrStart', 'TrEnd', 'category', 'ref', 'key']].copy()
-        df = df.explode(['TrStart', 'TrEnd'], ignore_index=True)
-        df = df.groupby(['Chr', 'Strand', 'exonChain', 'category', 'key'], as_index=False).agg({
-            'TrStart': tuple,
-            'TrEnd': tuple
-        }).reset_index(drop=True)
-
-        # TS 预测
-        terminalsitesprocessor = TerminalSitesProcessor(cluster_group_size = self.cluster_group_size,
-                                                        eps = self.eps,
-                                                        min_samples = self.min_samples,
-                                                        num_processes = self.num_processes)
-        df = terminalsitesprocessor.get_terminal_sites(df)
-
-        # 获取参考位点字典
-        ref_sites_dict = ref_anno.groupby('key').apply(
-            lambda df: list(zip(df['TrStart'], df['TrEnd']))
-        ).to_dict()
-
-        # 添加参考终止位点
-        df['terminal_sites'] = df.apply(lambda row: ref_sites_dict.get(row['key'], []), axis=1)
-
-        # 校正函数
-        def in_range(val, se, bp):
-            return se - bp <= val <= se + bp
-
-        def get_terminal_sites_ref(row):
-            """
-            获取预测和参考的终止位点，并返回匹配或校正的终止位点。
-
-            参数:
-            - row: 包含预测终止位点和参考终止位点信息的行。
-
-            返回:
-            - 返回匹配的 TSS 和 TES 位点，或者校正后的位点。
-            """
-            pred_TS = row['pred_terminal_sites']
-            TSS, TES = pred_TS[0], pred_TS[1]
-            ref_TS_list = row['terminal_sites']
-
-            # 如果参考的终止位点为空，返回 0
-            if pd.isna(ref_TS_list).any():
-                return 0
-
-            def get_corrected_site(site, ref_site, ref_list, bp=10):
-                """
-                校正位点。如果与参考位点范围内匹配，返回原位点。
-                否则，根据条件选择最接近的参考位点或最小差值的位点。
-                """
-                if in_range(site, ref_site, bp=bp):
-                    return site
-
-                # 最小差值大于10 直接取ref
-                min_diff = min(ref_list, key=lambda x: abs(x - ref_site))
-
-                if min_diff > 10:
-                    return ref_site
-
-            TS_ref = []
-            for ref in ref_TS_list:
-                start, end = ref
-
-                if in_range(TSS, start, bp=10) and in_range(TES, end, bp=10):
-                    TS_ref.append((TSS, TES))
-                    continue
-
-                corrected_TSS = get_corrected_site(TSS, start, row['TrStart'], bp=10)
-                corrected_TES = get_corrected_site(TES, end, row['TrEnd'], bp=10)
-                TS_ref.append((corrected_TSS, corrected_TES))
-
-            if len(ref_TS_list) == 0:
-                return [(TSS, TES)]
-
-            return TS_ref
-
-        # 应用参考位点校正
-        df['pred_terminal_sites_ref'] = df.apply(get_terminal_sites_ref, axis=1)
-        df = df.explode(['pred_terminal_sites_ref'], ignore_index=True)
-        df = df.drop(columns=['pred_terminal_sites'])
-        df.rename(columns={'pred_terminal_sites_ref': 'pred_terminal_sites'}, inplace=True)
-
-        # 清理重复数据
-        df = df[['Chr', 'Strand', 'exonChain', 'TrStart', 'TrEnd', 'pred_terminal_sites']].drop_duplicates()
-
-        return df
-    
-    
     def find_nearest_exon(self,ref_sites, query_sites):
         """使用二分查找找到每个 query 对应的最近匹配位点"""
         mapped_sites = []
@@ -366,19 +201,19 @@ class GTFRescueTSS:
         """
         单条染色体进行 nnc/nic correct
         """
-        df = df1.copy()
+        df = df1
         
         # 过滤不需要矫正的group 过滤:不含FSM 或只含FSM和ISM
-        df = df.groupby(["Chr", "Strand", "Group"]).filter(lambda g: any(g["category"] == 'FSM'))
-        df = df.groupby(["Chr", "Strand", "Group"]).filter(lambda g: "NIC" in g["category"].values or "NNC" in g["category"].values)
+        df = df.groupby(["Chr", "Strand", "Group"],observed=False).filter(lambda g: any(g["category"] == 'FSM'))
+        df = df.groupby(["Chr", "Strand", "Group"],observed=False).filter(lambda g: "NIC" in g["category"].values or "NNC" in g["category"].values)
     
         df['exonChain2'] = df['exonChain'].apply(lambda x: tuple(map(int, x.split('-'))))
         df['exonChain2_tuple'] = df['exonChain2'].apply(lambda x: [(x[i], x[i+1]) for i in range(0, len(x), 2)])
         
         correct_dict = {}
-        for _,df_group in df.groupby(['Chr','Strand','Group']):
-            df_ref_exonChain = df_group[df_group['category'] == 'FSM'].copy()
-            df_group_NNC_NIC = df_group[df_group['category'].isin(['NNC','NIC'])].copy()
+        for _,df_group in df.groupby(['Chr','Strand','Group'],observed=False):
+            df_ref_exonChain = df_group[df_group['category'] == 'FSM']
+            df_group_NNC_NIC = df_group[df_group['category'].isin(['NNC','NIC'])]
 
             # 获取小exon路径
             ref_exon = set([(exonC[i],exonC[i+1]) for exonC in df_ref_exonChain['exonChain2'].tolist() for i in range(1,len(exonC)-1,2)])
@@ -576,34 +411,47 @@ class GTFRescueTSS:
         
         
         # 校正
-        df1['key'] = df1['Chr'] + df1['Strand'] + '_' + df1['exonChain']
+        df1['key'] = df1['Chr'].astype(str) + df1['Strand'].astype(str) + '_' + df1['exonChain'].astype(str)
         df1['exonChain'] = df1.apply(lambda row : self.correct_exonChain(row, correct_dict, df1),axis = 1)
         
         # 整理数据
-        df1 = df1[df1['source'] == 'data'].copy()
-        df1 = df1[['Chr','Strand','exonChain','TrStart','TrEnd','Group']].copy()
+        # 聚合函数改为返回 numpy array
+        def merge_arrays(x):
+            return np.concatenate(x.values)
+        df1 = df1[df1['source'] == 'data']
+        df1 = df1[['Chr','Strand','exonChain','TrStart','TrEnd','Group']]
+        df1[['Chr', 'Strand']] = df1[['Chr', 'Strand']].astype(str)
+
+        df1 = df1.groupby(['Chr', 'Strand', 'exonChain', 'Group'], as_index=False).agg({
+            'TrStart': merge_arrays,
+            'TrEnd': merge_arrays
+        })
+
+        # df1 = df1.explode(['TrStart', 'TrEnd'], ignore_index=True)
+
+        # df1 = df1.groupby(['Chr', 'Strand', 'exonChain', 'Group'],
+        #                 as_index=False).agg({
+        #                     'TrStart': list,
+        #                     'TrEnd': list
+        #                 }).reset_index(drop=True)
         
-        df1 = df1.explode(['TrStart', 'TrEnd'], ignore_index=True)
-        df1 = df1.groupby(['Chr', 'Strand', 'exonChain', 'Group'],
-                        as_index=False).agg({
-                            'TrStart': list,
-                            'TrEnd': list
-                        }).reset_index(drop=True)
+        # 转换回 Categorical 类型
+        df1['Chr'] = pd.Categorical(df1['Chr'])
+        df1['Strand'] = pd.Categorical(df1['Strand'])
+        
 
         return df1
                     
-            
-            
-            
+  
     def correct(self, df, ref_anno):
         """
         nnc/nic correct
         """
-        df = df[['Chr','Strand','exonChain','category','TrStart','TrEnd']].copy()
-        df['key'] = df['Chr'] + df['Strand'] + df['exonChain']
+        df = df[['Chr','Strand','exonChain','category','TrStart','TrEnd']]
+        df['key'] = df['Chr'].astype(str) + df['Strand'].astype(str) + df['exonChain'].astype(str)
         
         ref_anno = ref_anno.copy()
-        ref_anno['key'] = ref_anno['Chr'] + ref_anno['Strand'] + ref_anno['exonChain']
+        ref_anno['key'] = ref_anno['Chr'].astype(str) + ref_anno['Strand'].astype(str) + ref_anno['exonChain'].astype(str)
         ref_anno['category'] = 'FSM'
         # 注释中未表达的exonChain添加到df中
         ref_anno = ref_anno[~ref_anno['key'].isin(df['key'])]
@@ -621,10 +469,10 @@ class GTFRescueTSS:
         df = gene_clustering.cluster(df)
         
         # 去除只含ref的group
-        df = df.groupby(['Chr', 'Strand', 'Group']).filter(lambda g: not all(g['source'] == 'ref'))
+        df = df.groupby(['Chr', 'Strand', 'Group'],observed=False).filter(lambda g: not all(g['source'] == 'ref'))
         
         # 多线程
-        chr_grouped = [chr_group for _, chr_group in df.groupby('Chr')]
+        chr_grouped = [chr_group for _, chr_group in df.groupby('Chr',observed=False)]
 
         with mp.Pool(self.num_processes) as pool:
             results = pool.map(self.correct_for_Chr, chr_grouped)
@@ -656,9 +504,9 @@ class GTFRescueTSS:
         
         #############
         ## 3. 碎片段
-        df = self.filter_groups(df,ref_anno)
-        
-        df['Group_freq'] = df.groupby(['Chr', 'Strand', 'Group'])['frequency'].transform('sum')
+        # df = self.filter_groups(df,ref_anno)
+        df['frequency'] = df['TrStart'].apply(len)
+        df['Group_freq'] = df.groupby(['Chr', 'Strand', 'Group'],observed=False)['frequency'].transform('sum')
         df['Group_freq_ratio'] = df.apply(lambda row: row['frequency'] / row['Group_freq'] if row['Group_freq'] != 0 else 0, axis=1)
         
         #############
@@ -673,9 +521,14 @@ class GTFRescueTSS:
         ## 6. NNC filter
         df = self.nnc_filter(df)
         
+        df = df.drop(columns = ['Group_freq','Group_freq_ratio','category'])
         
         ##########################
         ## 7. TS prediction
-        df = self.anno_TS_prediction_correct(df, ref_anno)
+        terminalsitesprocessor = TerminalSitesProcessor(cluster_group_size = self.cluster_group_size,
+                                                        eps = self.eps,
+                                                        min_samples = self.min_samples,
+                                                        num_processes = self.num_processes)
+        df = terminalsitesprocessor.get_terminal_sites(df)
         
         return df
