@@ -62,7 +62,7 @@ conda activate isatools
 conda install -c bioconda samtools -y
 
 # Clone ISAtools repository and install Python dependencies
-git clone https://github.com/yourusername/ISAtools.git
+git clone https://github.com/Chenhu7/ISAtools.git
 cd ISAtools
 pip install -r requirements.txt
 ```
@@ -70,7 +70,7 @@ pip install -r requirements.txt
 ### ✅ Use environment.yml (alternative setup)
 ```bash
 # Clone ISAtools repository
-git clone https://github.com/yourusername/ISAtools.git
+git clone https://github.com/Chenhu7/ISAtools.git
 cd ISAtools
 
 conda env create -f environment.yml
