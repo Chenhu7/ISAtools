@@ -258,30 +258,36 @@ class GTFRescueFiltering:
         ref_anno['TrEnd_reads'] = np.empty((len(ref_anno), 0)).tolist()
 
         ref_anno = ref_anno[~ref_anno['key'].isin(df['key'])]
-
-        df['source'] = 'data'
-        ref_anno['source'] = 'ref'
-        df['frequency'] = df['TrStart_reads'].apply(len)
-        ref_anno['frequency'] = 1
-
-        df = pd.concat([df, ref_anno], ignore_index=True)
-        gene_clustering = GeneClustering(num_processes=self.num_processes)
-        df = gene_clustering.cluster(df)
-        valid_groups = (
-            df.groupby(['Chr', 'Strand', 'Group'], observed=True)['source']
-            .agg(lambda x: not x.eq('ref').all())
-            .loc[lambda x: x].index
-            )
-        df = df[df.set_index(['Chr', 'Strand', 'Group']).index.isin(valid_groups)]
-
-        if df.empty:
+        
+        if ref_anno.empty:
+            gene_clustering = GeneClustering(num_processes=self.num_processes)
+            df = gene_clustering.cluster(df)
             return df[['Chr', 'Strand', 'SSC', 'TrStart_reads', 'TrEnd_reads', 'Group']]
+        
+        else:
+            df['source'] = 'data'
+            ref_anno['source'] = 'ref'
+            df['frequency'] = df['TrStart_reads'].apply(len)
+            ref_anno['frequency'] = 1
 
-        chr_grouped = [chr_group for _, chr_group in df.groupby(['Chr', 'Strand'], observed=True)]
-        with mp.Pool(self.num_processes) as pool:
-            results = pool.map(self.correct_for_chr, chr_grouped)
+            df = pd.concat([df, ref_anno], ignore_index=True)
+            gene_clustering = GeneClustering(num_processes=self.num_processes)
+            df = gene_clustering.cluster(df)
+            valid_groups = (
+                df.groupby(['Chr', 'Strand', 'Group'], observed=True)['source']
+                .agg(lambda x: not x.eq('ref').all())
+                .loc[lambda x: x].index
+                )
+            df = df[df.set_index(['Chr', 'Strand', 'Group']).index.isin(valid_groups)]
 
-        return pd.concat(results, ignore_index=True)
+            if df.empty:
+                return df[['Chr', 'Strand', 'SSC', 'TrStart_reads', 'TrEnd_reads', 'Group']]
+
+            chr_grouped = [chr_group for _, chr_group in df.groupby(['Chr', 'Strand'], observed=True)]
+            with mp.Pool(self.num_processes) as pool:
+                results = pool.map(self.correct_for_chr, chr_grouped)
+
+            return pd.concat(results, ignore_index=True)
         
     
     def anno_process(self,df_raw,df,ref_anno):

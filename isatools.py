@@ -165,7 +165,7 @@ def parse_args(cmd_args):
     parser.add_argument("--bam", "-b", type=str, nargs='+', required=True, help="Input sorted and indexed BAM file(s). [Required]")
 
     parser.add_argument("--output", "-o", type=str, default="isatools_output", help="Output directory. Default: isatools_output")
-    parser.add_argument("--threads", "-t", type=int, default=16, help="Number of threads to use. Default: 16")
+    parser.add_argument("--threads", "-t", type=int, default=4, help="Number of threads to use. Default: 4")
     parser.add_argument("--keep_temp", action="store_true", help="Keep intermediate files in the temp directory.")
 
     # Alignment filtering

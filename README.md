@@ -47,23 +47,40 @@ python isatools.py -r test/toy_data/test_genome.fasta \
 
 ## 📦 Installation
 
-Clone the repository:
+ISAtools requires **Python 3.8 or higher** and `samtools` in your `$PATH`.
+
+We recommend using [Conda](https://docs.conda.io/) to manage dependencies and environments.
+
+### ✅ Create a Conda environment
 
 ```bash
-git clone https://github.com/Chenhu7/ISAtools.git
-```
+# Create and activate the Conda environment
+conda create -n isatools python=3.8 -y
+conda activate isatools
 
-Install dependencies:
+# Install samtools
+conda install -c bioconda samtools -y
 
-```bash
+# Clone ISAtools repository and install Python dependencies
+git clone https://github.com/yourusername/ISAtools.git
 cd ISAtools
 pip install -r requirements.txt
 ```
 
-Verify installation by running the toy example:
+### ✅ Use environment.yml (alternative setup)
+```bash
+# Clone ISAtools repository
+git clone https://github.com/yourusername/ISAtools.git
+cd ISAtools
+
+conda env create -f environment.yml
+conda activate isatools
+```
+
+### 🧪 Verify installation by running the toy example:
 
 ```bash
-python isatools.py -r test/toy_data/test_genome.fasta -b test/toy_data/test_sample1.bam
+python isatools.py -r test/toy_data/test_genome.fasta -b test/toy_data/test_aligned.bam
 ```
 
 Upon successful execution, output files will appear in the default `isatools_output` folder.

@@ -1,0 +1,16 @@
+name: isatools
+channels:
+  - bioconda
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.8
+  - samtools
+  - pip
+  - pip:
+      - pandas>=2.2.0
+      - numpy>=1.26.0
+      - scikit-learn>=1.6.0
+      - networkx>=3.2.0
+      - pysam>=1.26.4
+      - biopython>=1.84
