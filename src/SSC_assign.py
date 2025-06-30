@@ -79,9 +79,10 @@ class SSCAssign:
         assignes = []
 
         for i in range(len(positions) - 1):
-            for j in range(i + 2, len(positions) + 1):  # j 是 end+1
+            for j in range(i + 2, len(positions) + 1):
                 subchain = "-".join(map(str, positions[i:j]))
                 if subchain in self.chain_set:
                     assignes.append(subchain)
 
         return assignes
+        

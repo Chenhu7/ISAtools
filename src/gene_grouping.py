@@ -19,7 +19,6 @@ class GeneClustering:
         df['start'] = df['SSC'].str.split('-').str[0].astype(np.int32)
         df['end'] = df['SSC'].str.split('-').str[-1].astype(np.int32)
 
-        # 区间聚类（向量化）
         df = df.sort_values(by='start')
         ends = df['end'].cummax().shift(1, fill_value=df['end'].iloc[0])
         group_ids = (df['start'] > ends).cumsum()

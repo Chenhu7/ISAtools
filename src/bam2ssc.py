@@ -96,7 +96,7 @@ def process_bam_chunk(bam, fasta_file, temp_dir, out_dir, threads, chunk_idx, st
 
     id_count = defaultdict(int)
     ec = defaultdict(int)
-    seq_cache = {}  # 缓存序列
+    seq_cache = {}
     processed_lines = 0
     written_out1 = 0
     written_out2 = 0

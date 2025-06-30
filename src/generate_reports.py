@@ -14,13 +14,13 @@ class IsoformAnnotator:
         df = df.copy()
         df['Group'] = df['Chr'].astype(str) + '_' + df['Strand'].astype(str) + '_' + df['Group'].astype(str)
 
-        Gi = 1  # Gene计数器
+        Gi = 1
         gene_id_map = {}
         tr_id_map = {}
         gene_names_map = {}
 
         for _, group_df in df.groupby('Group',observed=True):
-            Ti = 1  # Transcript计数器
+            Ti = 1
             first_row = group_df.iloc[0]
             gene_id = f"{first_row['Chr']}_{first_row['Strand']}_Gene{Gi}"
             gene_name = gene_id

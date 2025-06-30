@@ -16,9 +16,6 @@ class NncNicGraphProcessor:
         self.num_processes = num_processes
         
     def get_edges_weight_SSCfull(self, df_group):
-        """
-        获取df中所有边的权重  (frequency)/(group freq)   [node1,node2,weight]
-        """
         dict_net = {}
 
         group_freq = df_group['frequency'].sum()
@@ -36,9 +33,6 @@ class NncNicGraphProcessor:
     
 
     def get_edges_weight(self, df_group):
-        """
-        获取df中所有边的权重  (frequency)/(group freq)   [node1,node2,weight]
-        """
         dict_net = {}
 
         group_freq = df_group['frequency'].sum()
