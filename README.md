@@ -20,7 +20,7 @@ For example, using the toy data provided in this repository:
 
 ```bash
 python isatools.py -r test/toy_data/test_genome.fasta \
-	-b test/toy_data/test_sample1.bam test/toy_data/test_sample2.bam test/toy_data/test_sample3.bam
+	-b test/toy_data/test_aligned.bam
 ```
 
 To run ISAtools with a reference gene annotation:
@@ -36,7 +36,7 @@ Example with toy data:
 
 ```bash
 python isatools.py -r test/toy_data/test_genome.fasta \
-	-b test/toy_data/test_sample1.bam test/toy_data/test_sample2.bam test/toy_data/test_sample3.bam \
+	-b test/toy_data/test_aligned.bam \
 	-g test/toy_data/test_annotation.gtf \
 	-o OUTPUT_FOLDER
 ```
