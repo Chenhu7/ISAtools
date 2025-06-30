@@ -47,7 +47,7 @@ python isatools.py -r test/toy_data/test_genome.fasta \
 
 ## 📦 Installation
 
-ISAtools requires **Python 3.8 or higher** and `samtools` in your `$PATH`.
+ISAtools requires **Python 3.9 or higher** and `samtools` in your `$PATH`.
 
 We recommend using [Conda](https://docs.conda.io/) to manage dependencies and environments.
 
@@ -55,7 +55,7 @@ We recommend using [Conda](https://docs.conda.io/) to manage dependencies and en
 
 ```bash
 # Create and activate the Conda environment
-conda create -n isatools python=3.8 -y
+conda create -n isatools python=3.9 -y
 conda activate isatools
 
 # Install samtools
@@ -80,6 +80,8 @@ conda activate isatools
 ### 🧪 Verify installation by running the toy example:
 
 ```bash
+conda activate isatools
+
 python isatools.py -r test/toy_data/test_genome.fasta -b test/toy_data/test_aligned.bam
 ```
 
