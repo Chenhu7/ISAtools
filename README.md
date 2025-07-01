@@ -80,8 +80,6 @@ conda activate isatools
 ### 🧪 Verify installation by running the toy example:
 
 ```bash
-conda activate isatools
-
 python isatools.py -r test/toy_data/test_genome.fasta -b test/toy_data/test_aligned.bam
 ```
 
