@@ -7,7 +7,7 @@ If reference annotations are available, ISAtools incorporates conserved, low-abu
 
 ---
 
-## 🔧 Quick Start
+## Quick Start
 
 To run ISAtools with aligned reads, the minimum required parameters are:
 
@@ -45,13 +45,13 @@ python isatools.py -r test/toy_data/test_genome.fasta \
 
 ---
 
-## 📦 Installation
+## Installation
 
 ISAtools requires **Python 3.9 or higher** and `samtools` in your `$PATH`.
 
 We recommend using [Conda](https://docs.conda.io/) to manage dependencies and environments.
 
-### ✅ Create a Conda environment
+### Create a Conda environment
 
 ```bash
 # Create and activate the Conda environment
@@ -67,7 +67,7 @@ cd ISAtools
 pip install -r requirements.txt
 ```
 
-### ✅ Use environment.yml (alternative setup)
+### Use environment.yml (alternative setup)
 ```bash
 # Clone ISAtools repository
 git clone https://github.com/Chenhu7/ISAtools.git
@@ -77,7 +77,7 @@ conda env create -f environment.yml
 conda activate isatools
 ```
 
-### 🧪 Verify installation by running the toy example:
+### Verify installation by running the toy example:
 
 ```bash
 python isatools.py -r test/toy_data/test_genome.fasta -b test/toy_data/test_aligned.bam
@@ -87,7 +87,7 @@ Upon successful execution, output files will appear in the default `isatools_out
 
 ---
 
-## 📁 Output Files
+## Output Files
 
 ### Main Output
 
@@ -105,7 +105,7 @@ Upon successful execution, output files will appear in the default `isatools_out
 
 ---
 
-## 📄 File Format Descriptions
+## File Format Descriptions
 
 ### Expression Tables (`*_counts.tsv`, `*_tpm.tsv`)
 
