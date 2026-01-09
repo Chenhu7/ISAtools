@@ -1,7 +1,7 @@
 
 # ISAtools
 
-**ISAtools** (**I**soform **S**equencing **A**nalysis tools) is a **sequencing data–driven framework** for full-length RNA isoform reconstruction and quantification from PacBio circular consensus sequencing data. Designed with annotation flexibility and biological fidelity in mind, ISAtools supports isoform identification with high precision and recall, and accurately resolves splice junctions and transcript boundaries directly from read evidence.
+**ISAtools** (**I**soform **S**equencing **A**nalysis tools) is a **sequencing data–driven framework** for full-length RNA isoform reconstruction and quantification from **PacBio circular consensus sequencing data**. Designed with annotation flexibility and biological fidelity in mind, ISAtools supports isoform identification with high precision and recall, and accurately resolves splice junctions and transcript boundaries directly from read evidence.
 
 If reference annotations are available, ISAtools incorporates conserved, low-abundance isoforms through guided filtering and rescue steps, further enhancing transcriptome completeness.
 
