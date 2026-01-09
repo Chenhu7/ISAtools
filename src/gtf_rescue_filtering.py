@@ -159,6 +159,8 @@ class GTFRescueFiltering:
 
                 if row.category == 'NIC' and ref_little_exon_paths:
                     for path in ref_little_exon_paths:
+                        if len(path) < 2: continue
+
                         path_set = set(path[1:-1])
                         if (len(path_set - set(ssc2)) == 2 and set([path[0], path[-1]]).issubset(ssc2)):
                             correct_path = row.SSC.replace(
@@ -172,6 +174,8 @@ class GTFRescueFiltering:
                     # 1
                     if ref_little_exon_paths:
                         for path in ref_little_exon_paths:
+                            if len(path) < 2: continue
+                            
                             if not self.is_within_littleExon_range(diff_sites, path[0], path[-1]):
                                 continue
                             if len(diff_sites) == 1:

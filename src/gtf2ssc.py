@@ -87,7 +87,7 @@ def main(input_gtf, workers, chunk_size, output_file=None):
     merged = merge_dicts(all_results)
 
     if output_file is None:
-        output_file = input_gtf.rsplit('.', 1)[0] + ".SSC"
+        output_file = input_gtf.rsplit('.', 1)[0] + ".ssc"
     with open(output_file, 'w') as out:
         out.write("TrID\tGeneID\tGeneName\tChr\tStrand\tTrStart\tTrEnd\tSSC\n")
         for tr_id, info in merged.items():
@@ -103,7 +103,7 @@ if __name__ == "__main__":
     parser.add_argument("-i", "--input_gtf", help="Input GTF or GTF.gz file")
     parser.add_argument("-w", "--workers", type=int, default=4, help="Number of workers (default: 4)")
     parser.add_argument("-c", "--chunk_size", type=int, default=10000, help="Chunk size for processing lines (default: 10000)")
-    parser.add_argument("-o", "--output", default=None, help="Output SSC file path (default: input filename + .SSC)")
+    parser.add_argument("-o", "--output", default=None, help="Output SSC file path (default: input filename + .ssc)")
 
     args = parser.parse_args()
 
