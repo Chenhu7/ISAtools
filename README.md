@@ -87,6 +87,45 @@ Upon successful execution, output files will appear in the default `isatools_out
 
 ---
 
+## Parameters
+
+| Category                                | Parameter                                   | Description                                                 | Default           |
+| --------------------------------------- | ------------------------------------------- | ----------------------------------------------------------- | ----------------- |
+| **Basic**                               | `-r, --reference`                           | Reference genome in FASTA format (supports gzipped files).  | Required          |
+|                                         | `-b, --bam`                                 | Input sorted and indexed BAM file(s).                       | Required          |
+|                                         | `-o, --output`                              | Output directory.                                           | `isatools_output` |
+|                                         | `-t, --threads`                             | Number of threads to use.                                   | `4`               |
+|                                         | `--keep_temp`                               | Retain intermediate files.                                  | Off               |
+| **Alignment Filtering**                 | `--min_aln_identity`                        | Minimum alignment identity to retain reads.                 | `0.97`            |
+|                                         | `--min_aln_coverage`                        | Minimum alignment coverage.                                 | `0.99`            |
+| **SSC Filtering**                       | `--filter_freq`                             | Minimum read support to retain an SSC.                      | `2`               |
+|                                         | `--min_junction_freq`                       | Minimum read support for splice junctions.                  | `2`               |
+|                                         | `--junction_freq_ratio`                     | Minimum frequency ratio for junction filtering.             | `0.25`            |
+| **Consensus Refinement**                | `--consensus_bp`                            | Allowed positional deviation (bp) for consensus correction. | `10`              |
+|                                         | `--consensus_multiple`                      | Minimum read support ratio for consensus correction.        | `0.1`             |
+| **Splice Structure Filtering**          | `--threshold_lowWeight_edges`               | Threshold ratio for filtering weak graph edges.             | `0.05`            |
+| **NNC/NIC Identification & Correction** | `--exon_excursion_diff_bp`                  | Maximum allowed exon position deviation.                    | `20`              |
+|                                         | `--error_sites_diff_bp`                     | Max deviation for suspected error sites.                    | `10`              |
+|                                         | `--error_sites_multiple`                    | Read ratio threshold for error site detection.              | `0.01`            |
+|                                         | `--little_exon_bp`                          | Maximum size defining a small exon.                         | `30`              |
+|                                         | `--little_exon_mismatch_diff_bp`            | Allowed mismatch deviation for small exons.                 | `10`              |
+|                                         | `--Nolittle_exon_mismatch_diff_bp`          | Allowed mismatch deviation for regular exons.               | `20`              |
+|                                         | `--little_exon_jump_multiple`               | Ratio threshold for exon skipping detection.                | `0.1`             |
+| **ISM Identification & Filtering**      | `--threshold_logFC_truncation_source_freq`  | logFC threshold for source SSC filtering.                   | `0`               |
+|                                         | `--threshold_logFC_truncation_group_freq`   | logFC threshold for group-level truncation filtering.       | `-100`            |
+|                                         | `--threshold_fragmentary_transcript_bp`     | Minimum transcript length to retain.                        | `100`             |
+| **Optional Annotation Refinement**      | `-g, --gtf_anno`                            | Reference annotation (GTF/GFF) for rescue and filtering.    | None              |
+|                                         | `--mismatch_error_sites_bp`                 | Max deviation for mismatch error detection.                 | `20`              |
+|                                         | `--mismatch_error_sites_groupfreq_multiple` | Ratio threshold for mismatch grouping.                      | `0.25`            |
+|                                         | `--fake_exon_group_freq_multiple`           | Ratio threshold for fake exon detection.                    | `0.1`             |
+|                                         | `--fake_exon_bp`                            | Max length of a candidate fake exon.                        | `50`              |
+|                                         | `--ism_freqRatio_notrun`                    | Minimum ratio to retain non-truncated ISMs.                 | `0.5`             |
+| **TSS/TES Detection**                   | `--cluster_group_size`                      | Maximum group size for clustering.                          | `1500`            |
+|                                         | `--eps`                                     | DBSCAN epsilon (distance threshold, bp).                    | `50`              |
+|                                         | `--min_samples`                             | Minimum reads required to form a cluster.                   | `20`              |
+
+---
+
 ## Output Files
 
 ### Main Output
