@@ -5,6 +5,8 @@
 
 If reference annotations are available, ISAtools incorporates conserved, low-abundance isoforms through guided filtering and rescue steps, further enhancing transcriptome completeness.
 
+If you use ISAtools in your research, please cite [Hu Chen et al., 2026](https://doi.org/10.1093/bib/bbag403).
+
 ---
 
 ## Quick Start
