@@ -1,4 +1,5 @@
 
+
 # ISAtools
 
 **ISAtools** (**I**soform **S**equencing **A**nalysis tools) is a **sequencing data–driven framework** for full-length RNA isoform reconstruction and quantification from **PacBio circular consensus sequencing data**. Designed with annotation flexibility and biological fidelity in mind, ISAtools supports isoform identification with high precision and recall, and accurately resolves splice junctions and transcript boundaries directly from read evidence.
@@ -138,7 +139,7 @@ Upon successful execution, output files will appear in the default `isatools_out
 - `isatools_transcript_counts.tsv`: Transcript-level read counts.
 - `isatools_transcript_tpm.tsv`: Transcript-level TPMs.
 
-### Optional Output (with `--keep_temp`)
+### Optional Output (with `--keep_temp`, written to the `temp` subdirectory)
 
 - `*_flnc.ssc`: Read-level SSC file with alignment details.
 - `*_ssc.count`: Unique SSCs with aggregated read counts.
